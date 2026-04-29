@@ -1,0 +1,202 @@
+﻿{
+   "CodeGenerationMode": 6,
+   "ContextClassName": "CrediflowContext",
+   "ContextNamespace": null,
+   "FilterSchemas": false,
+   "IncludeConnectionString": false,
+   "IrregularWords": null,
+   "MinimumProductVersion": "2.6.1378",
+   "ModelNamespace": null,
+   "OutputContextPath": null,
+   "OutputPath": "Models",
+   "PluralRules": null,
+   "PreserveCasingWithRegex": true,
+   "ProjectRootNamespace": "CrediFlow.DataContext",
+   "Schemas": null,
+   "SelectedHandlebarsLanguage": 2,
+   "SelectedToBeGenerated": 0,
+   "SingularRules": null,
+   "T4TemplatePath": null,
+   "Tables": [
+      {
+         "Name": "public.app_users",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.audit_logs",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.bad_debt_cases",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.cash_voucher_allocations",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.cash_vouchers",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.collaborators",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.custom_role_permissions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.custom_roles",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.customer_documents",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.customer_sources",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.customer_visits",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.customers",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.data_access_logs",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.insurance_contracts",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_charges",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_collaterals",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_contract_attachments",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_contract_documents",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_contracts",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_products",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_repayment_schedules",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_settlements",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.loan_status_histories",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.permissions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.policy_setting_stores",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.policy_settings",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.role_permissions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.store_day_locks",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.stores",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.user_custom_roles",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.user_login_history",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.user_permissions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.user_sessions",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.user_store_assignments",
+         "ObjectType": 0
+      },
+      {
+         "Name": "public.v_daily_collections",
+         "ObjectType": 3
+      },
+      {
+         "Name": "public.v_overdue_schedules",
+         "ObjectType": 3
+      },
+      {
+         "Name": "public.v_store_outstanding_loans",
+         "ObjectType": 3
+      },
+      {
+         "Name": "public.v_user_permissions",
+         "ObjectType": 3
+      }
+   ],
+   "UiHint": null,
+   "UncountableWords": null,
+   "UseAsyncStoredProcedureCalls": true,
+   "UseBoolPropertiesWithoutDefaultSql": false,
+   "UseDatabaseNames": false,
+   "UseDatabaseNamesForRoutines": true,
+   "UseDateOnlyTimeOnly": true,
+   "UseDbContextSplitting": false,
+   "UseDecimalDataAnnotationForSprocResult": true,
+   "UseFluentApiOnly": true,
+   "UseHandleBars": false,
+   "UseHierarchyId": false,
+   "UseInflector": true,
+   "UseInternalAccessModifiersForSprocsAndFunctions": false,
+   "UseLegacyPluralizer": false,
+   "UseManyToManyEntity": false,
+   "UseNoDefaultConstructor": false,
+   "UseNoNavigations": false,
+   "UseNoObjectFilter": false,
+   "UseNodaTime": false,
+   "UseNullableReferences": true,
+   "UsePrefixNavigationNaming": false,
+   "UseSchemaFolders": false,
+   "UseSchemaNamespaces": false,
+   "UseSpatial": false,
+   "UseT4": false,
+   "UseT4Split": false,
+   "UseTypedTvpParameters": true
+}

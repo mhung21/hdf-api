@@ -1,0 +1,162 @@
+using System.Security.Claims;
+using CrediFlow.Common.Common.Startup;
+using CrediFlow.API.Models;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.IdentityModel.Tokens;
+using CrediFlow.API.Services;
+using Microsoft.OpenApi;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration.Bind(ConfigRoot.Config);
+
+// Add services to the container.
+
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        // Identity service exposes /.well-known/openid-configuration và JWKS
+        options.Authority = Config.Urls.IdentityServer;
+        options.Audience = Config.JwtSettings.Audience;
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+        options.MapInboundClaims = false;
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = Config.JwtSettings.Issuer,
+            ValidateAudience = true,
+            ValidAudience = Config.JwtSettings.Audience,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+            NameClaimType = ClaimTypes.Name,
+            RoleClaimType = "role_code"
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", policy =>
+        policy.RequireClaim("is_admin", "true", "True", "TRUE"));
+
+    options.AddPolicy("StoreManagerOnly", policy =>
+        policy.RequireClaim("is_store_manager", "true", "True", "TRUE"));
+
+    options.AddPolicy("CanManageCustomers", policy =>
+        policy.RequireClaim("permission", "customer.manage"));
+});
+
+
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddStartupServices(builder.Configuration);
+builder.Services.AddCustomService(builder.Configuration);
+
+
+
+
+
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+// builder.Services.AddSwaggerGen(c =>
+// {
+//     c.SwaggerDoc("v1", new OpenApiInfo
+//     {
+//         Title = "CrediFlow Identity API",
+//         Version = "v1",
+//         Description = "Authentication and authorization service for CrediFlow loan management system"
+//     });
+
+//     // Add JWT Authentication to Swagger
+//     var securityScheme = new OpenApiSecurityScheme
+//     {
+//         Name = "Authorization",
+//         Type = SecuritySchemeType.Http,
+//         Scheme = "bearer",
+//         BearerFormat = "JWT",
+//         In = ParameterLocation.Header,
+//         Description = "Enter your JWT token in the format: Bearer {token}"
+//     };
+//     c.AddSecurityDefinition("Bearer", securityScheme);
+
+//     c.AddSecurityRequirement(new OpenApiSecurityRequirement
+//     {
+//         { securityScheme, Array.Empty<string>() }
+//     });
+// });
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAngular", policy =>
+        policy.WithOrigins(
+                "http://localhost:4200",
+                "https://quanly.hdfinanceco.vn",
+                "https://localhost:4200")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials());
+});
+
+builder.Services.AddControllers();
+// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddOpenApi();
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline.
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+// Log toàn bộ hệ thống (những chỗ không có try catch thì lỗi sẽ bắn vào đây) => Như vậy có thể bỏ hết try catch trên các controller đi
+//https://stackoverflow.com/questions/38630076/asp-net-core-web-api-exception-handling
+
+app.UseExceptionHandler(a => a.Run(async context =>
+{
+    var exceptionHandlerPathFeature = context.Features.Get<IExceptionHandlerPathFeature>();
+    var ex = exceptionHandlerPathFeature.Error;
+
+    Console.WriteLine($"Lỗi: {exceptionHandlerPathFeature.Path} - Message: {ex.Message} - InnerException: {ex.InnerException} - StackTrace: {ex.StackTrace}");
+
+    // var objLog = new
+    // {
+    //     ServiceName = "LASI api - " + builder.Configuration.GetValue("Scope:Environment", ""),
+    //     Source = ex.Source,
+    //     Path = exceptionHandlerPathFeature.Path,
+    //     Url = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.Path}",
+    //     Message = ex.Message,
+    //     InnerException = ex.InnerException?.ToString(),
+    //     StackTrace = ex.StackTrace,
+    //     Data = JsonConvert.SerializeObject(ex.Data)
+    // };
+
+    //TODO
+    //Lib.PushToLog(objLog);
+
+    // var result = CommonLib.ConvertObjectToJson(ResultAPI.Error(ex.Message));
+    // context.Response.StatusCode = 200;  // (int)HttpStatusCode.InternalServerError;
+    // context.Response.ContentType = "application/json";
+    // await context.Response.WriteAsync(result);
+}));
+
+// Disabled: Nginx xử lý SSL/TLS (reverse proxy), app chỉ nhận HTTP từ proxy.
+// Middleware này sẽ cố redirect HTTP → HTTPS nhưng không biết port HTTPS → lỗi.
+// Do not uncomment unless deployed as standalone HTTPS app.
+// if (!app.Environment.IsDevelopment())
+// {
+//     app.UseHttpsRedirection();
+// }
+
+app.UseCors("AllowAngular");
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.Run();

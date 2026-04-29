@@ -1,0 +1,43 @@
+services:
+  api:
+    image: registry.lasiapp.vn:2105/crediflow-api:1.0.0
+    container_name: hdf-api
+    ports:
+      - "127.0.0.1:8881:80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+
+      # --- Database ---
+      - ConnectionStrings__CrediFlowConnection=Host=hdf-postgres18;Port=5432;Database=crediflow;Username=dev;Password=P&k24DLm!y3^5*4i;Maximum Pool Size=30;Minimum Pool Size=2;
+      - ConnectionStrings__CrediFlowIdentityDB=Host=hdf-postgres18;Port=5432;Database=crediflow;Username=dev;Password=P&k24DLm!y3^5*4i;Maximum Pool Size=10;Minimum Pool Size=2;
+
+      # --- JWT / Identity ---
+      - JwtSettings__Issuer=https://quanly.hdfinanceco.vn
+      - JwtSettings__Audience=hdf.api.identity
+      - Urls__IdentityServer=https://quanly.hdfinanceco.vn
+
+      # --- File storage ---
+      - FileStorage__BasePath=/data/contracts
+      - FileStorage__MaxFileSizeBytes=20971520
+
+      # --- Logging ---
+      - Logging__LogLevel__Default=Information
+      - Logging__LogLevel__Microsoft.AspNetCore=Warning
+      - Logging__LogLevel__Microsoft.EntityFrameworkCore=Warning
+      - Logging__LogLevel__CrediFlow=Information
+
+      - AllowedHosts=*
+
+    volumes:
+      # Bind mount thẳng vào thư mục thật trên host — không mất dữ liệu khi docker bị xoá/hỏng
+      - /opt/hdf/contracts:/data/contracts
+
+    restart: unless-stopped
+
+    networks:
+      - hdf-net
+
+networks:
+  hdf-net:
+    external: true
