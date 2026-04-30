@@ -95,7 +95,7 @@ namespace CrediFlow.API.Controllers
     {
         public string? Keyword { get; set; }
         public int PageIndex { get; set; } = 1;
-        public int PageSize { get; set; } = 20;
+        public int PageSize { get; set; } = 1000;
     }
 
     /// <summary>Request model cho báo cáo hoa hồng CTV.</summary>
@@ -105,6 +105,6 @@ namespace CrediFlow.API.Controllers
         public DateOnly? ToDate    { get; set; }
         public Guid?     StoreId   { get; set; }
         public int       PageIndex { get; set; } = 1;
-        public int       PageSize  { get; set; } = 50;
+        public int       PageSize  { get; set; } = 1000;
     }
 }

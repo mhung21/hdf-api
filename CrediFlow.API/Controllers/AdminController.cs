@@ -30,10 +30,8 @@ namespace CrediFlow.API.Controllers
         // POST api/Admin/MigrateNationalIdEncryption
         [HttpPost]
         public async Task<ActionResult<ResultAPI>> MigrateNationalIdEncryption(
-            [FromQuery] int batchSize = 100, CancellationToken ct = default)
+            [FromQuery] int batchSize = 1000, CancellationToken ct = default)
         {
-            batchSize = Math.Clamp(batchSize, 1, 500);
-
             int processed = 0;
             int errors    = 0;
 

@@ -125,7 +125,7 @@ namespace CrediFlow.API.Controllers
     {
         public string? Keyword   { get; set; }
         public int     PageIndex { get; set; } = 1;
-        public int     PageSize  { get; set; } = 10;
+        public int     PageSize  { get; set; } = 1000;
         /// <summary>StoreName | StoreCode | IsActive | CreatedAt</summary>
         public string? SortBy    { get; set; } = "StoreName";
         public bool    SortDesc  { get; set; } = false;

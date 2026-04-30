@@ -356,7 +356,7 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchCashVoucher(string keyword, int pageIndex, int pageSize, string? sortBy, bool sortDesc, Guid? loanContractId = null)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.CashVouchers.AsQueryable();
 

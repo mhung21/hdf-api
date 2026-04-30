@@ -93,7 +93,7 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchCollaborator(string keyword, int pageIndex, int pageSize)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.Collaborators
                 .Include(c => c.Store)
@@ -149,7 +149,6 @@ namespace CrediFlow.API.Services
         public async Task<object> GetCommissionReport(DateOnly? fromDate, DateOnly? toDate, Guid? storeId, int pageIndex, int pageSize)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize  = Math.Clamp(pageSize, 1, 200);
 
             // Lấy tất cả hợp đồng đã giải ngân (DISBURSED, SETTLED, CLOSED, BAD_DEBT, BAD_DEBT_CLOSED)
             // của khách hàng do CTV giới thiệu, trong khoảng thời gian lọc.

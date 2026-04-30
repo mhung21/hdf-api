@@ -72,7 +72,7 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchInsuranceContract(string keyword, int pageIndex, int pageSize, string? sortBy, bool sortDesc)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.InsuranceContracts.AsQueryable();
 

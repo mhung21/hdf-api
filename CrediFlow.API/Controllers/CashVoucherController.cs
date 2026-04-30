@@ -115,7 +115,7 @@ namespace CrediFlow.API.Controllers
     {
         public string? Keyword        { get; set; }
         public int     PageIndex      { get; set; } = 1;
-        public int     PageSize       { get; set; } = 10;
+        public int     PageSize       { get; set; } = 1000;
         /// <summary>VoucherNo | BusinessDate | VoucherType | Amount | CreatedAt | VoucherDatetime</summary>
         public string? SortBy         { get; set; } = "VoucherDatetime";
         public bool    SortDesc       { get; set; } = true;

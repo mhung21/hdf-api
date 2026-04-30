@@ -153,7 +153,7 @@ namespace CrediFlow.API.Services
             bool? hasBadDebt = null, bool? hasActiveLoan = null, List<Guid>? filterStoreIds = null)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.Customers.AsQueryable();
 

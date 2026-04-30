@@ -127,7 +127,7 @@ namespace CrediFlow.API.Controllers
     {
         public string? Keyword   { get; set; }
         public int     PageIndex { get; set; } = 1;
-        public int     PageSize  { get; set; } = 10;
+        public int     PageSize  { get; set; } = 1000;
         /// <summary>TransferredAt | StatusCode | TotalOutstandingAmount | CreatedAt</summary>
         public string? SortBy    { get; set; } = "TransferredAt";
         public bool    SortDesc  { get; set; } = true;

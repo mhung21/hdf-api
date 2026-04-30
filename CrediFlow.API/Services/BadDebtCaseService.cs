@@ -120,7 +120,6 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchBadDebtCase(string keyword, int pageIndex, int pageSize, string? sortBy, bool sortDesc)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
 
             var query = DbContext.BadDebtCases
                 .Include(b => b.LoanContract).ThenInclude(c => c.Customer)

@@ -437,7 +437,7 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchLoanContract(string keyword, int pageIndex, int pageSize, string? sortBy, bool sortDesc, string? statusCode = null, string? dateFilterType = null, DateOnly? fromDate = null, DateOnly? toDate = null, List<Guid>? filterStoreIds = null)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.LoanContracts
                 .AsQueryable();

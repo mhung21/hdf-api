@@ -77,7 +77,7 @@ namespace CrediFlow.API.Services
         public async Task<object> SearchLoanCharge(string keyword, int pageIndex, int pageSize, string? sortBy, bool sortDesc)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-            pageSize = Math.Clamp(pageSize, 1, 200);
+
 
             var query = DbContext.LoanCharges.AsQueryable();
 

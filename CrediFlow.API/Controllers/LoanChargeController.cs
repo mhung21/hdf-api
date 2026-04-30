@@ -78,7 +78,7 @@ namespace CrediFlow.API.Controllers
     {
         public string? Keyword   { get; set; }
         public int     PageIndex { get; set; } = 1;
-        public int     PageSize  { get; set; } = 10;
+        public int     PageSize  { get; set; } = 1000;
         /// <summary>DueDate | ChargeDate | StatusCode | Amount | CreatedAt</summary>
         public string? SortBy    { get; set; } = "DueDate";
         public bool    SortDesc  { get; set; } = false;
