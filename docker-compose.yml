@@ -1,6 +1,6 @@
 services:
   api:
-    image: registry.lasiapp.vn:2105/crediflow-api:1.0.0
+    image: xuantruong2204/crediflow-api:1.0.1
     container_name: hdf-api
     ports:
       - "127.0.0.1:8881:80"

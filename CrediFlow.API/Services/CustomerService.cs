@@ -1,4 +1,4 @@
-﻿using CrediFlow.API.Models;
+using CrediFlow.API.Models;
 using CrediFlow.API.Utils;
 using CrediFlow.Common.Caching;
 using CrediFlow.Common.Services;
@@ -301,7 +301,9 @@ namespace CrediFlow.API.Services
                 throw new UnauthorizedAccessException(
                     "Chỉ quản lý cửa hàng hoặc admin mới có quyền chuyển giao khách hàng.");
 
-            var obj = await DbContext.Customers.FindAsync(customerId)
+            var obj = await DbContext.Customers
+                      .Include(c => c.FirstStore)
+                      .FirstOrDefaultAsync(c => c.CustomerId == customerId)
                       ?? throw new KeyNotFoundException($"Không tìm thấy khách hàng với Id = {customerId}");
 
             // StoreManager chỉ chuyển giao trong phạm vi cửa hàng mình
@@ -313,10 +315,23 @@ namespace CrediFlow.API.Services
                         "Bạn không có quyền chuyển giao khách hàng của chi nhánh khác.");
             }
 
+            // Lấy thông tin nhân viên mới để xác định chi nhánh đích
+            var targetUser = await DbContext.AppUsers
+                .Include(u => u.Store)
+                .FirstOrDefaultAsync(u => u.UserId == targetUserId)
+                ?? throw new KeyNotFoundException($"Không tìm thấy nhân viên với Id = {targetUserId}");
+
+            // Snapshot dữ liệu cũ để ghi log
+            var oldAssignedUserId = obj.AssignedToUserId;
+            var oldStoreId = obj.FirstStoreId;
+            var oldStoreName = obj.FirstStore?.StoreName;
+
+            // Cập nhật người phụ trách + chi nhánh của khách hàng
             obj.AssignedToUserId = targetUserId;
+            obj.FirstStoreId = targetUser.StoreId ?? obj.FirstStoreId;
             obj.UpdatedAt = DateTime.Now;
 
-            // Chuyển giao toàn bộ hợp đồng vay của khách hàng sang nhân viên mới
+            // Chuyển giao toàn bộ hợp đồng vay của khách hàng sang nhân viên mới + chi nhánh mới
             var contracts = await DbContext.LoanContracts
                 .Where(c => c.CustomerId == customerId)
                 .ToListAsync();
@@ -324,8 +339,39 @@ namespace CrediFlow.API.Services
             foreach (var contract in contracts)
             {
                 contract.AssignedToUserId = targetUserId;
+                if (targetUser.StoreId.HasValue)
+                    contract.StoreId = targetUser.StoreId.Value;
                 contract.UpdatedAt = DateTime.Now;
             }
+
+            // Ghi audit log chuyển giao
+            DbContext.AuditLogs.Add(new AuditLog
+            {
+                AuditLogId = Guid.CreateVersion7(),
+                TableName = "customers",
+                RecordId = customerId,
+                ActionCode = "ASSIGN",
+                OldData = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    AssignedToUserId = oldAssignedUserId,
+                    FirstStoreId = oldStoreId,
+                    StoreName = oldStoreName,
+                }),
+                NewData = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    AssignedToUserId = targetUserId,
+                    FirstStoreId = targetUser.StoreId,
+                    StoreName = targetUser.Store?.StoreName,
+                    ContractsTransferred = contracts.Count,
+                }),
+                ChangedBy = CommonLib.GetGUID(User.UserId),
+                ChangedAt = DateTime.Now,
+                CustomerId = customerId,
+                StoreId = targetUser.StoreId,
+                Note = $"Chuyển giao khách hàng '{obj.FullName}' và {contracts.Count} hợp đồng " +
+                       $"từ CN '{oldStoreName}' sang CN '{targetUser.Store?.StoreName}' " +
+                       $"cho NV '{targetUser.FullName}'",
+            });
 
             await DbContext.SaveChangesAsync();
         }
