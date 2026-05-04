@@ -494,11 +494,11 @@ namespace CrediFlow.API.Services
 
             var sorted = (sortBy?.Trim().ToLower() ?? "contractno") switch
             {
-                "contractno" => sortDesc ? query.OrderByDescending(c => c.ContractNo) : query.OrderBy(c => c.ContractNo),
-                "applicationdate" => sortDesc ? query.OrderByDescending(c => c.ApplicationDate) : query.OrderBy(c => c.ApplicationDate),
-                "statuscode" => sortDesc ? query.OrderByDescending(c => c.StatusCode) : query.OrderBy(c => c.StatusCode),
-                "principalamount" => sortDesc ? query.OrderByDescending(c => c.PrincipalAmount) : query.OrderBy(c => c.PrincipalAmount),
-                _ => sortDesc ? query.OrderByDescending(c => c.CreatedAt) : query.OrderBy(c => c.CreatedAt)
+                "contractno" => sortDesc ? query.OrderByDescending(c => c.ContractNo).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.ContractNo).ThenByDescending(c => c.CreatedAt),
+                "applicationdate" => sortDesc ? query.OrderByDescending(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt),
+                "statuscode" => sortDesc ? query.OrderByDescending(c => c.StatusCode).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.StatusCode).ThenByDescending(c => c.CreatedAt),
+                "principalamount" => sortDesc ? query.OrderByDescending(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt),
+                _ => sortDesc ? query.OrderByDescending(c => c.CreatedAt).ThenBy(c => c.LoanContractId) : query.OrderBy(c => c.CreatedAt).ThenBy(c => c.LoanContractId)
             };
 
             var items = await sorted
@@ -1287,6 +1287,15 @@ namespace CrediFlow.API.Services
                 if (storeScopeIds is not null && !storeScopeIds.Any(id => id == obj.StoreId))
                     throw new UnauthorizedAccessException(
                         "Bạn không có quyền chuyển giao hợp đồng của chi nhánh khác.");
+            }
+
+            // Lấy thông tin nhân viên được phân công để cập nhật lại StoreId cho hợp đồng
+            var targetUser = await DbContext.AppUsers.FindAsync(targetUserId)
+                             ?? throw new KeyNotFoundException($"Không tìm thấy nhân viên với Id = {targetUserId}");
+
+            if (targetUser.StoreId.HasValue)
+            {
+                obj.StoreId = targetUser.StoreId.Value;
             }
 
             obj.AssignedToUserId = targetUserId;
