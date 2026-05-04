@@ -1,0 +1,50 @@
+services:
+  crediflow-api-test:
+    image: xuantruong2204/crediflow-api:dev
+    container_name: hdf-api-test
+    restart: unless-stopped
+    ports:
+      - "8883:80"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:80
+
+      # Database — Test DB
+      ConnectionStrings__CrediFlowConnection: "Host=hdf-postgres18-test;Port=5432;Database=crediflow;Username=dev;Password=P&k24DLm!y3^5*4i;Maximum Pool Size=30;Minimum Pool Size=2;"
+      ConnectionStrings__CrediFlowIdentityDB: "Host=hdf-postgres18-test;Port=5432;Database=crediflow;Username=dev;Password=P&k24DLm!y3^5*4i;Maximum Pool Size=10;Minimum Pool Size=2;"
+
+      # JWT / Identity — trỏ vào identity test container
+      JwtSettings__Issuer: "https://quanly.hdfinanceco.vn"
+      JwtSettings__Audience: "hdf.api.identity"
+      Urls__IdentityServer: "http://hdf-identity-test:80"
+
+      # File storage
+      FileStorage__BasePath: /data/contracts
+      FileStorage__MaxFileSizeBytes: "20971520"
+
+      # Encryption
+      Encryption__NationalIdKey: "5sQk+DNjgXHmeVCtzc41NkbMPdRB7KdciY407JjJXhU="
+
+      # Logging — verbose cho dev
+      Logging__LogLevel__Default: Information
+      Logging__LogLevel__Microsoft__AspNetCore: Warning
+      Logging__LogLevel__Microsoft__EntityFrameworkCore: Warning
+      Logging__LogLevel__CrediFlow: Debug
+
+      AllowedHosts: "*"
+
+    volumes:
+      - /opt/hdf-test/contracts:/data/contracts
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - hdf-test-net
+
+networks:
+  hdf-test-net:
+    external: true

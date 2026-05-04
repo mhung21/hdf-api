@@ -153,7 +153,7 @@ namespace CrediFlow.API.Services
             bool? hasBadDebt = null, bool? hasActiveLoan = null, List<Guid>? filterStoreIds = null)
         {
             pageIndex = pageIndex < 1 ? 1 : pageIndex;
-
+            pageSize = pageSize < 1 ? 1 : pageSize;
 
             var query = DbContext.Customers.AsQueryable();
 
@@ -206,14 +206,14 @@ namespace CrediFlow.API.Services
 
             int total = await query.CountAsync();
 
-            var sorted = (sortBy?.Trim().ToLower() ?? "fullname") switch
+            var sorted = (sortBy?.Trim().ToLower() ?? "createdat") switch
             {
                 "nationalid"   => sortDesc ? query.OrderByDescending(c => c.NationalIdHash) : query.OrderBy(c => c.NationalIdHash),
                 "customercode" => sortDesc ? query.OrderByDescending(c => c.CustomerCode) : query.OrderBy(c => c.CustomerCode),
                 "phone"        => sortDesc ? query.OrderByDescending(c => c.Phone)        : query.OrderBy(c => c.Phone),
-                "createdat"    => sortDesc ? query.OrderByDescending(c => c.CreatedAt)    : query.OrderBy(c => c.CreatedAt),
                 "updatedat"    => sortDesc ? query.OrderByDescending(c => c.UpdatedAt)    : query.OrderBy(c => c.UpdatedAt),
-                _              => sortDesc ? query.OrderByDescending(c => c.FullName)     : query.OrderBy(c => c.FullName)
+                "fullname"     => sortDesc ? query.OrderByDescending(c => c.FullName)     : query.OrderBy(c => c.FullName),
+                _              => sortDesc ? query.OrderBy(c => c.CreatedAt)              : query.OrderByDescending(c => c.CreatedAt),  // default: newest first
             };
 
             var rawItems = await sorted
@@ -239,6 +239,10 @@ namespace CrediFlow.API.Services
                     c.Gender,
                     c.ReferredByCollaboratorId,
                     CollaboratorName = c.ReferredByCollaborator != null ? c.ReferredByCollaborator.FullName : null,
+                    c.CreatedAt,
+                    CreatedByName = c.CreatedBy.HasValue
+                        ? DbContext.AppUsers.Where(u => u.UserId == c.CreatedBy.Value).Select(u => u.FullName).FirstOrDefault()
+                        : null,
                 })
                 .ToListAsync();
 
@@ -260,6 +264,8 @@ namespace CrediFlow.API.Services
                 c.Gender,
                 c.ReferredByCollaboratorId,
                 c.CollaboratorName,
+                c.CreatedAt,
+                c.CreatedByName,
             }).ToList();
 
             return new
