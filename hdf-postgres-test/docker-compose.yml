@@ -1,0 +1,45 @@
+services:
+  postgres-test:
+    image: postgres:18
+    container_name: hdf-postgres18-test
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: crediflow
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: "P&k24DLm!y3^5*4i"
+      TZ: Asia/Bangkok
+      PGTZ: Asia/Bangkok
+      PGDATA: /var/lib/postgresql/18/docker
+
+    command: >
+      postgres -c config_file=/etc/postgresql/postgresql.conf
+
+    ports:
+      - "55433:5432"
+
+    volumes:
+      - /opt/stacks/postgres18-test/data:/var/lib/postgresql
+      - /opt/stacks/postgres18-test/config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - /opt/stacks/postgres18-test/init:/docker-entrypoint-initdb.d:ro
+
+    shm_size: 128mb
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d crediflow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    networks:
+      - hdf-test-net
+
+networks:
+  hdf-test-net:
+    external: true

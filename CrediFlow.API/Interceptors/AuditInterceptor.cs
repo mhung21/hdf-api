@@ -91,7 +91,7 @@ public class AuditInterceptor : SaveChangesInterceptor
                 EntityState.Added    => "INSERT",
                 EntityState.Modified => "UPDATE",
                 // EntityState.Deleted: domain này không xóa bản ghi (immutable records).
-                // DB CHECK constraint chỉ cho phép ('INSERT','UPDATE','STATUS_CHANGE')
+                // DB CHECK constraint cho phép ('INSERT','UPDATE','STATUS_CHANGE','ASSIGN')
                 // nên bỏ qua Deleted để tránh vi phạm constraint.
                 _                    => null,
             };

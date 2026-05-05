@@ -19,7 +19,18 @@ builder.Services
     .AddJwtBearer(options =>
     {
         // Identity service exposes /.well-known/openid-configuration và JWKS
-        options.Authority = Config.Urls.IdentityServer;
+        // Use MetadataAddress (instead of Authority) to avoid OIDC discovery issuer mismatch
+        // between internal Docker URL (Urls.IdentityServer) and external Issuer domain
+        var identityUrl = Config.Urls.IdentityServer?.TrimEnd('/');
+        if (!string.IsNullOrEmpty(identityUrl))
+        {
+            options.MetadataAddress = $"{identityUrl}/.well-known/openid-configuration";
+        }
+        else
+        {
+            // Local dev without Identity server — use Issuer as Authority fallback
+            options.Authority = Config.JwtSettings.Issuer;
+        }
         options.Audience = Config.JwtSettings.Audience;
         options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         options.MapInboundClaims = false;
@@ -94,9 +105,13 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowAngular", policy =>
         policy.WithOrigins(
                 "http://localhost:4200",
+                "https://localhost:4200",
                 "https://quanly.hdfinanceco.vn",
                 "https://quanly-dev.hdfinanceco.vn",    // Test domain
-                "https://localhost:4200")
+                "https://localhost:4200",
+                "http://103.176.179.103:8080",    // Test frontend
+                "http://103.176.179.103:8883",    // Test API
+                "http://103.176.179.103:8884")    // Test Identity
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials());

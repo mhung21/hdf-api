@@ -494,11 +494,11 @@ namespace CrediFlow.API.Services
 
             var sorted = (sortBy?.Trim().ToLower() ?? "contractno") switch
             {
-                "contractno" => sortDesc ? query.OrderByDescending(c => c.ContractNo) : query.OrderBy(c => c.ContractNo),
-                "applicationdate" => sortDesc ? query.OrderByDescending(c => c.ApplicationDate) : query.OrderBy(c => c.ApplicationDate),
-                "statuscode" => sortDesc ? query.OrderByDescending(c => c.StatusCode) : query.OrderBy(c => c.StatusCode),
-                "principalamount" => sortDesc ? query.OrderByDescending(c => c.PrincipalAmount) : query.OrderBy(c => c.PrincipalAmount),
-                _ => sortDesc ? query.OrderByDescending(c => c.CreatedAt) : query.OrderBy(c => c.CreatedAt)
+                "contractno" => sortDesc ? query.OrderByDescending(c => c.ContractNo).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.ContractNo).ThenByDescending(c => c.CreatedAt),
+                "applicationdate" => sortDesc ? query.OrderByDescending(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt),
+                "statuscode" => sortDesc ? query.OrderByDescending(c => c.StatusCode).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.StatusCode).ThenByDescending(c => c.CreatedAt),
+                "principalamount" => sortDesc ? query.OrderByDescending(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt),
+                _ => sortDesc ? query.OrderByDescending(c => c.CreatedAt).ThenBy(c => c.LoanContractId) : query.OrderBy(c => c.CreatedAt).ThenBy(c => c.LoanContractId)
             };
 
             var items = await sorted
@@ -1277,7 +1277,9 @@ namespace CrediFlow.API.Services
                 throw new UnauthorizedAccessException(
                     "Chỉ quản lý cửa hàng hoặc admin mới có quyền chuyển giao hợp đồng.");
 
-            var obj = await DbContext.LoanContracts.FindAsync(loanContractId)
+            var obj = await DbContext.LoanContracts
+                      .Include(c => c.Store)
+                      .FirstOrDefaultAsync(c => c.LoanContractId == loanContractId)
                       ?? throw new KeyNotFoundException($"Không tìm thấy hợp đồng với Id = {loanContractId}");
 
             // StoreManager chỉ phân công trong phạm vi cửa hàng mình
@@ -1289,8 +1291,50 @@ namespace CrediFlow.API.Services
                         "Bạn không có quyền chuyển giao hợp đồng của chi nhánh khác.");
             }
 
+            // Lấy thông tin nhân viên mới để xác định chi nhánh đích
+            var targetUser = await DbContext.AppUsers
+                .Include(u => u.Store)
+                .FirstOrDefaultAsync(u => u.UserId == targetUserId)
+                ?? throw new KeyNotFoundException($"Không tìm thấy nhân viên với Id = {targetUserId}");
+
+            // Snapshot dữ liệu cũ để ghi log
+            var oldAssignedUserId = obj.AssignedToUserId;
+            var oldStoreId = obj.StoreId;
+            var oldStoreName = obj.Store?.StoreName;
+
+            // Cập nhật người phụ trách + chi nhánh
             obj.AssignedToUserId = targetUserId;
+            if (targetUser.StoreId.HasValue)
+                obj.StoreId = targetUser.StoreId.Value;
             obj.UpdatedAt = DateTime.Now;
+
+            // Ghi audit log chuyển giao
+            DbContext.AuditLogs.Add(new AuditLog
+            {
+                AuditLogId = Guid.CreateVersion7(),
+                TableName = "loan_contracts",
+                RecordId = loanContractId,
+                ActionCode = "ASSIGN",
+                OldData = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    AssignedToUserId = oldAssignedUserId,
+                    StoreId = oldStoreId,
+                    StoreName = oldStoreName,
+                }),
+                NewData = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    AssignedToUserId = targetUserId,
+                    StoreId = targetUser.StoreId,
+                    StoreName = targetUser.Store?.StoreName,
+                }),
+                ChangedBy = CommonLib.GetGUID(User.UserId),
+                ChangedAt = DateTime.Now,
+                LoanContractId = loanContractId,
+                StoreId = targetUser.StoreId,
+                Note = $"Chuyển giao HĐ '{obj.ContractNo}' " +
+                       $"từ CN '{oldStoreName}' sang CN '{targetUser.Store?.StoreName}' " +
+                       $"cho NV '{targetUser.FullName}'",
+            });
 
             await DbContext.SaveChangesAsync();
             return obj;
