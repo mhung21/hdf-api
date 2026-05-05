@@ -109,7 +109,7 @@ namespace CrediFlow.API.Services
                     // Gốc hiệu dụng = gốc thực + bảo hiểm (đã gộp vào lịch trả nợ)
                     PrincipalAmount   = c.PrincipalAmount + c.InsuranceAmountSnapshot,
                     RemainingPrincipal = (c.PrincipalAmount + c.InsuranceAmountSnapshot)
-                                        - c.LoanRepaymentSchedules.Sum(s => s.PaidPrincipalAmount),
+                                        - (c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidPrincipalAmount) ?? 0),
                     DisbursedDate     = c.DisbursementDate,
                     MaturityDate      = c.MaturityDate,
                     StatusCode        = c.StatusCode,
@@ -438,10 +438,10 @@ namespace CrediFlow.API.Services
                 {
                     c.StatusCode,
                     c.PrincipalAmount,
-                    TotalPrincipalCollected = c.LoanRepaymentSchedules.Sum(s => s.PaidPrincipalAmount),
-                    TotalInterestCollected  = c.LoanRepaymentSchedules.Sum(s => s.PaidInterestAmount),
-                    TotalFeeCollected       = c.LoanRepaymentSchedules.Sum(s => s.PaidPeriodicFeeAmount),
-                    TotalPenaltyCollected   = c.LoanRepaymentSchedules.Sum(s => s.PaidLatePenaltyAmount),
+                    TotalPrincipalCollected = c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidPrincipalAmount) ?? 0,
+                    TotalInterestCollected  = c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidInterestAmount) ?? 0,
+                    TotalFeeCollected       = c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidPeriodicFeeAmount) ?? 0,
+                    TotalPenaltyCollected   = c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidLatePenaltyAmount) ?? 0,
                     HasOverdue = c.LoanRepaymentSchedules.Any(s => s.StatusCode == "OVERDUE"),
                 })
                 .ToListAsync();
