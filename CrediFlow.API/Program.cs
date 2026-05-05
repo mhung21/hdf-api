@@ -95,6 +95,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(
                 "http://localhost:4200",
                 "https://quanly.hdfinanceco.vn",
+                "https://quanly-dev.hdfinanceco.vn",    // Test domain
                 "https://localhost:4200")
               .AllowAnyHeader()
               .AllowAnyMethod()
