@@ -14,6 +14,12 @@ builder.Configuration.Bind(ConfigRoot.Config);
 // Add services to the container.
 
 
+// Read JWT config directly from IConfiguration (Config static properties are NOT
+// populated by Bind() — .NET ConfigurationBinder skips static props silently)
+var jwtIssuer = builder.Configuration["JwtSettings:Issuer"];
+var jwtAudience = builder.Configuration["JwtSettings:Audience"];
+var identityServerUrl = builder.Configuration["Urls:IdentityServer"]?.TrimEnd('/');
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -21,26 +27,25 @@ builder.Services
         // Identity service exposes /.well-known/openid-configuration và JWKS
         // Use MetadataAddress (instead of Authority) to avoid OIDC discovery issuer mismatch
         // between internal Docker URL (Urls.IdentityServer) and external Issuer domain
-        var identityUrl = Config.Urls.IdentityServer?.TrimEnd('/');
-        if (!string.IsNullOrEmpty(identityUrl))
+        if (!string.IsNullOrEmpty(identityServerUrl))
         {
-            options.MetadataAddress = $"{identityUrl}/.well-known/openid-configuration";
+            options.MetadataAddress = $"{identityServerUrl}/.well-known/openid-configuration";
         }
         else
         {
             // Local dev without Identity server — use Issuer as Authority fallback
-            options.Authority = Config.JwtSettings.Issuer;
+            options.Authority = jwtIssuer;
         }
-        options.Audience = Config.JwtSettings.Audience;
-        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+        options.Audience = jwtAudience;
+        options.RequireHttpsMetadata = builder.Environment.IsProduction();
         options.MapInboundClaims = false;
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = Config.JwtSettings.Issuer,
+            ValidIssuer = jwtIssuer,
             ValidateAudience = true,
-            ValidAudience = Config.JwtSettings.Audience,
+            ValidAudience = jwtAudience,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
             ClockSkew = TimeSpan.FromMinutes(1),
@@ -124,7 +129,7 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+if (!app.Environment.IsProduction())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
