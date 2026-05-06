@@ -335,6 +335,10 @@ public partial class CrediflowContext : DbContext
                 .HasColumnName("voucher_datetime");
             entity.Property(e => e.VoucherNo).HasColumnName("voucher_no");
             entity.Property(e => e.VoucherType).HasColumnName("voucher_type");
+            entity.Property(e => e.PaymentMethod)
+                .HasColumnName("payment_method");
+            entity.Property(e => e.BankName).HasColumnName("bank_name");
+            entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
 
             entity.HasOne(d => d.ApprovedByNavigation).WithMany(p => p.CashVoucherApprovedByNavigations)
                 .HasForeignKey(d => d.ApprovedBy)

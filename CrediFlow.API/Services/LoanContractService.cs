@@ -244,6 +244,13 @@ namespace CrediFlow.API.Services
 
             if (isCreate)
             {
+                // Kiểm tra quyền tạo hợp đồng từ DB (dynamic permissions)
+                if (!await PermissionChecker.HasPermissionAsync(
+                        DbContext, CachingHelper, CommonLib.GetGUID(User.UserId) ?? Guid.Empty,
+                        User.RoleCode, "LOAN_CREATE"))
+                    throw new UnauthorizedAccessException(
+                        "Bạn không có quyền tạo hợp đồng vay. Vui lòng liên hệ quản trị viên.");
+
                 // Kiểm tra InitialStatus hợp lệ
                 var allowedInitialStatuses = new[] {
                     LoanContractStatus.Draft,
@@ -266,6 +273,19 @@ namespace CrediFlow.API.Services
                         "Chỉ quản lý cửa hàng hoặc admin mới có thể nhập hợp đồng đã giải ngân trực tiếp.");
 
                 var creatorId = CommonLib.GetGUID(User.UserId);
+
+                // Chặn duplicate: cùng KH + chi nhánh + số tiền + người tạo trong 30s
+                var cutoff = DateTime.Now.AddSeconds(-30);
+                var hasDuplicate = await DbContext.LoanContracts
+                    .AnyAsync(c => c.CustomerId == model.CustomerId
+                        && c.StoreId == model.StoreId
+                        && c.PrincipalAmount == model.PrincipalAmount
+                        && c.CreatedAt >= cutoff
+                        && c.CreatedBy == creatorId);
+                if (hasDuplicate)
+                    throw new InvalidOperationException(
+                        "Hợp đồng tương tự đã được tạo trong vòng 30 giây trước. " +
+                        "Vui lòng kiểm tra lại danh sách hợp đồng.");
 
                 // Lấy chính sách đang hiệu lực: ưu tiên chính sách cửa hàng, fallback về chính sách toàn cục
                 var today = DateOnly.FromDateTime(DateTime.Today);
@@ -780,6 +800,15 @@ namespace CrediFlow.API.Services
                 return obj;
 
             // ── Kiểm tra phân quyền cho từng loại transition ──────────────────
+
+            // Hủy hợp đồng: kiểm tra quyền LOAN_CANCEL từ hệ thống phân quyền
+            if (toStatus == LoanContractStatus.Cancelled)
+            {
+                if (!await PermissionChecker.HasPermissionAsync(DbContext, CachingHelper, User.UserId, User.RoleCode, "LOAN_CANCEL"))
+                    throw new UnauthorizedAccessException(
+                        "Bạn không có quyền hủy hợp đồng. Vui lòng liên hệ quản trị viên.");
+            }
+
             // Duyệt / từ chối: PENDING_APPROVAL → (PENDING_DISBURSEMENT | DRAFT)
             if (fromStatus == LoanContractStatus.PendingApproval &&
                 (toStatus == LoanContractStatus.PendingDisbursement || toStatus == LoanContractStatus.Draft))

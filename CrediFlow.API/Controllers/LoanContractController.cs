@@ -106,7 +106,7 @@ namespace CrediFlow.API.Controllers
             if (!ModelState.IsValid)
                 return Ok(ResultAPI.Error(ModelState, "Dữ liệu không hợp lệ.", 400));
 
-            // Chỉ StoreManager hoặc Admin mới được hủy hợp đồng
+            // Kiểm tra vai trò cơ bản (kiểm tra quyền chi tiết ở service)
             if (!_userInfoService.IsStoreManager && !_userInfoService.IsRegionalManager && !_userInfoService.IsAdmin)
                 return Ok(ResultAPI.ResultWithAccessDenined());
 
@@ -115,8 +115,9 @@ namespace CrediFlow.API.Controllers
                 var rs = await _loanContractService.Cancel(request.LoanContractId, request.CancellationReason);
                 return Ok(ResultAPI.Success(rs, $"Đã hủy hợp đồng {rs.ContractNo} thành công."));
             }
-            catch (KeyNotFoundException ex)      { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
-            catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (KeyNotFoundException ex)        { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
+            catch (UnauthorizedAccessException ex)   { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
+            catch (InvalidOperationException ex)     { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
         }
 
         // POST api/LoanContract/GetRepaymentSchedule

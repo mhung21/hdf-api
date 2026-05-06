@@ -1,5 +1,7 @@
+using CrediFlow.API.Utils;
 using CrediFlow.Common.Caching;
 using CrediFlow.Common.Services;
+using CrediFlow.Common.Utils;
 using CrediFlow.DataContext.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +21,9 @@ namespace CrediFlow.API.Services
         /// StoreManager: quyền của STORE_MANAGER trừ STAFF defaults.
         /// </summary>
         Task<IList<PermissionDto>> GetAssignablePermissions();
+
+        /// <summary>Ghi đè toàn bộ quyền mặc định của một vai trò. Chỉ ADMIN.</summary>
+        Task<IList<PermissionDto>> SaveRolePermissions(string roleCode, List<Guid> permissionIds);
     }
 
     public class RolePermissionService : BaseService<RolePermission, CrediflowContext>, IRolePermissionService
@@ -123,6 +128,48 @@ namespace CrediFlow.API.Services
             }
 
             return new List<PermissionDto>();
+        }
+
+        /// <summary>Ghi đè toàn bộ quyền mặc định của một vai trò.</summary>
+        public async Task<IList<PermissionDto>> SaveRolePermissions(string roleCode, List<Guid> permissionIds)
+        {
+            if (!User.IsAdmin)
+                throw new UnauthorizedAccessException("Chỉ admin mới có quyền thay đổi quyền mặc định của vai trò.");
+
+            var validRoles = new[] { "ADMIN", "REGIONAL_MANAGER", "STORE_MANAGER", "STAFF" };
+            if (!validRoles.Contains(roleCode))
+                throw new InvalidOperationException($"RoleCode không hợp lệ: {roleCode}");
+
+            // Xóa mapping cũ
+            var existing = await DbContext.RolePermissions
+                .Where(rp => rp.RoleCode == roleCode)
+                .ToListAsync();
+            DbContext.RolePermissions.RemoveRange(existing);
+
+            // Thêm mapping mới
+            var distinctIds = permissionIds.Distinct().ToList();
+            var userId = CommonLib.GetGUID(User.UserId);
+            var now = DateTime.Now;
+
+            foreach (var permId in distinctIds)
+            {
+                DbContext.RolePermissions.Add(new RolePermission
+                {
+                    RolePermissionId = Guid.CreateVersion7(),
+                    RoleCode = roleCode,
+                    PermissionId = permId,
+                    CreatedAt = now,
+                    CreatedBy = userId,
+                });
+            }
+
+            await DbContext.SaveChangesAsync();
+
+            // Invalidate cache quyền cho tất cả user thuộc role này
+            await PermissionChecker.InvalidateRolePermissionCachesAsync(DbContext, CachingHelper, roleCode);
+
+            // Trả về danh sách quyền đã lưu
+            return await GetPermissionsByRole(roleCode);
         }
     }
 

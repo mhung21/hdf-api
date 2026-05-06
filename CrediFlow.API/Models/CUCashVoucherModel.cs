@@ -38,6 +38,15 @@ namespace CrediFlow.API.Models
         public string Description { get; set; } = null!;
 
         public bool IsAdjustment { get; set; } = false;
+
+        /// <summary>Hình thức thanh toán: CASH | COMPANY_ACCOUNT (chỉ áp dụng cho phiếu chi)</summary>
+        public string? PaymentMethod { get; set; }
+
+        /// <summary>Tên ngân hàng (khi chuyển khoản).</summary>
+        public string? BankName { get; set; }
+
+        /// <summary>Số tài khoản ngân hàng (khi chuyển khoản).</summary>
+        public string? BankAccountNumber { get; set; }
     }
 
     /// <summary>

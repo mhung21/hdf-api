@@ -79,6 +79,15 @@ namespace CrediFlow.API.Services
                 using var client = _httpClientFactory.CreateClient();
                 client.BaseAddress = new Uri(Config.Urls.IdentityServer);
 
+                // ADMIN / REGIONAL_MANAGER → tự gán chi nhánh "Tổng công ty"
+                Guid? resolvedStoreId = model.StoreId;
+                if (roleCodeEnum == Consts.UserRoleCode.ADMIN || roleCodeEnum == Consts.UserRoleCode.REGIONAL_MANAGER)
+                {
+                    var hqStore = await DbContext.Stores
+                        .FirstOrDefaultAsync(s => s.StoreName == StoreName.Headquarters);
+                    resolvedStoreId = hqStore?.StoreId;
+                }
+
                 var payload = new
                 {
                     username = model.Username,
@@ -87,7 +96,7 @@ namespace CrediFlow.API.Services
                     email,
                     phone,
                     roleCode = roleCodeEnum,
-                    storeId = model.StoreId,
+                    storeId = resolvedStoreId,
                     storeIds = model.StoreIds,
                     isActive = model.IsActive,
                     mustChangePassword = model.MustChangePassword,
@@ -135,7 +144,19 @@ namespace CrediFlow.API.Services
             obj.Phone = model.Phone ?? obj.Phone;
             obj.Email = model.Email ?? obj.Email;
             obj.RoleCode = model.RoleCode;
-            obj.StoreId = model.RoleCode == RoleCode.RegionalManager || model.RoleCode == RoleCode.Admin ? null : model.StoreId;
+
+            // ADMIN / REGIONAL_MANAGER → tự gán chi nhánh "Tổng công ty"
+            if (model.RoleCode == RoleCode.Admin || model.RoleCode == RoleCode.RegionalManager)
+            {
+                var hqStore = await DbContext.Stores
+                    .FirstOrDefaultAsync(s => s.StoreName == StoreName.Headquarters);
+                obj.StoreId = hqStore?.StoreId ?? obj.StoreId;
+            }
+            else
+            {
+                obj.StoreId = model.StoreId ?? obj.StoreId;
+            }
+
             obj.IsActive = model.IsActive;
             obj.MustChangePassword = model.MustChangePassword;
 

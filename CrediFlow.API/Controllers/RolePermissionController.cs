@@ -1,7 +1,10 @@
 using CrediFlow.API.Models;
 using CrediFlow.API.Services;
+using CrediFlow.API.Utils;
+using CrediFlow.Common.Caching;
 using CrediFlow.Common.Models;
 using CrediFlow.Common.Services;
+using CrediFlow.DataContext.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,11 +17,19 @@ namespace CrediFlow.API.Controllers
     {
         private readonly IRolePermissionService _rolePermissionService;
         private readonly IUserInfoService _userInfoService;
+        private readonly CrediflowContext _dbContext;
+        private readonly ICachingHelper _cachingHelper;
 
-        public RolePermissionController(IRolePermissionService rolePermissionService, IUserInfoService userInfoService)
+        public RolePermissionController(
+            IRolePermissionService rolePermissionService,
+            IUserInfoService userInfoService,
+            CrediflowContext dbContext,
+            ICachingHelper cachingHelper)
         {
             _rolePermissionService = rolePermissionService;
             _userInfoService = userInfoService;
+            _dbContext = dbContext;
+            _cachingHelper = cachingHelper;
         }
 
         /// <summary>
@@ -75,5 +86,49 @@ namespace CrediFlow.API.Controllers
                 return Ok(ResultAPI.Error(null, ex.Message, 500));
             }
         }
+
+        /// <summary>
+        /// Ghi đè toàn bộ quyền mặc định của một vai trò. Chỉ ADMIN.
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<ResultAPI>> SaveRolePermissions([FromBody] SaveRolePermissionsRequest request)
+        {
+            try
+            {
+                var result = await _rolePermissionService.SaveRolePermissions(request.RoleCode, request.PermissionIds);
+                return Ok(ResultAPI.Success(result, "Cập nhật quyền thành công"));
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Ok(ResultAPI.Error(null, ex.Message, 403));
+            }
+            catch (Exception ex)
+            {
+                return Ok(ResultAPI.Error(null, ex.Message, 500));
+            }
+        }
+
+        /// <summary>
+        /// Xóa toàn bộ cache phân quyền của tất cả user. Chỉ ADMIN.
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<ResultAPI>> ClearPermissionCache()
+        {
+            try
+            {
+                await PermissionChecker.InvalidateAllPermissionCachesAsync(_dbContext, _cachingHelper);
+                return Ok(ResultAPI.Success(null, "Đã xóa cache phân quyền toàn hệ thống"));
+            }
+            catch (Exception ex)
+            {
+                return Ok(ResultAPI.Error(null, ex.Message, 500));
+            }
+        }
+    }
+
+    public class SaveRolePermissionsRequest
+    {
+        public string RoleCode { get; set; } = null!;
+        public List<Guid> PermissionIds { get; set; } = new();
     }
 }

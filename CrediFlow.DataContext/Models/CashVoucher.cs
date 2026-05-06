@@ -49,6 +49,12 @@ public partial class CashVoucher
 
     public DateTime UpdatedAt { get; set; }
 
+    public string? PaymentMethod { get; set; }
+
+    public string? BankName { get; set; }
+
+    public string? BankAccountNumber { get; set; }
+
     public virtual AppUser? ApprovedByNavigation { get; set; }
 
     public virtual ICollection<CashVoucherAllocation> CashVoucherAllocations { get; set; } = new List<CashVoucherAllocation>();
