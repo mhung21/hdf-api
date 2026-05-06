@@ -334,7 +334,7 @@ namespace CrediFlow.API.Services
                 .FirstOrDefaultAsync(u => u.UserId == targetUserId)
                 ?? throw new KeyNotFoundException($"Không tìm thấy nhân viên với Id = {targetUserId}");
 
-            if (!targetUser.StoreId.HasValue || !User.IsAdmin)
+            if (!targetUser.StoreId.HasValue)
                 throw new InvalidOperationException(
                     $"Nhân viên '{targetUser.FullName}' chưa được gán chi nhánh, không thể chuyển giao.");
 
