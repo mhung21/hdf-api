@@ -144,25 +144,10 @@ app.UseExceptionHandler(a => a.Run(async context =>
 
     Console.WriteLine($"Lỗi: {exceptionHandlerPathFeature.Path} - Message: {ex.Message} - InnerException: {ex.InnerException} - StackTrace: {ex.StackTrace}");
 
-    // var objLog = new
-    // {
-    //     ServiceName = "LASI api - " + builder.Configuration.GetValue("Scope:Environment", ""),
-    //     Source = ex.Source,
-    //     Path = exceptionHandlerPathFeature.Path,
-    //     Url = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.Path}",
-    //     Message = ex.Message,
-    //     InnerException = ex.InnerException?.ToString(),
-    //     StackTrace = ex.StackTrace,
-    //     Data = JsonConvert.SerializeObject(ex.Data)
-    // };
-
-    //TODO
-    //Lib.PushToLog(objLog);
-
-    // var result = CommonLib.ConvertObjectToJson(ResultAPI.Error(ex.Message));
-    // context.Response.StatusCode = 200;  // (int)HttpStatusCode.InternalServerError;
-    // context.Response.ContentType = "application/json";
-    // await context.Response.WriteAsync(result);
+    context.Response.StatusCode = 500;
+    context.Response.ContentType = "application/json";
+    var errorResponse = new { success = false, message = ex.Message, path = exceptionHandlerPathFeature.Path };
+    await context.Response.WriteAsJsonAsync(errorResponse);
 }));
 
 // Disabled: Nginx xử lý SSL/TLS (reverse proxy), app chỉ nhận HTTP từ proxy.

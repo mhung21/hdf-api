@@ -1,4 +1,4 @@
-﻿using CrediFlow.API.Models;
+using CrediFlow.API.Models;
 using CrediFlow.API.Services;
 using CrediFlow.Common.Models;
 using CrediFlow.Common.Services;
@@ -44,21 +44,28 @@ namespace CrediFlow.API.Controllers
         [HttpPost]
         public async Task<ActionResult<ResultAPI>> Search([FromBody] SearchCustomerRequest request)
         {
-            var filterStoreIds = (_userInfoService.IsAdmin && request.FilterStoreIds != null && request.FilterStoreIds.Any())
-                ? request.FilterStoreIds
-                : null;
+            try
+            {
+                var filterStoreIds = (_userInfoService.IsAdmin && request.FilterStoreIds != null && request.FilterStoreIds.Any())
+                    ? request.FilterStoreIds
+                    : null;
 
-            var rs = await _customerService.SearchCustomer(
-                request.Keyword  ?? string.Empty,
-                request.PageIndex,
-                request.PageSize,
-                request.SortBy,
-                request.SortDesc,
-                request.HasBadDebt,
-                request.HasActiveLoan,
-                filterStoreIds);
+                var rs = await _customerService.SearchCustomer(
+                    request.Keyword  ?? string.Empty,
+                    request.PageIndex,
+                    request.PageSize,
+                    request.SortBy,
+                    request.SortDesc,
+                    request.HasBadDebt,
+                    request.HasActiveLoan,
+                    filterStoreIds);
 
-            return Ok(ResultAPI.Success(rs));
+                return Ok(ResultAPI.Success(rs));
+            }
+            catch (Exception ex)
+            {
+                return Ok(ResultAPI.Error(null, $"Lỗi khi tìm kiếm khách hàng: {ex.Message}"));
+            }
         }
 
         // POST api/Customer/GetByNationalId
