@@ -49,7 +49,7 @@ public partial class CashVoucher
 
     public DateTime UpdatedAt { get; set; }
 
-    public string PaymentMethod { get; set; } = "CASH";
+    public string? PaymentMethod { get; set; }
 
     public string? BankName { get; set; }
 

@@ -85,8 +85,17 @@ namespace CrediFlow.API.Services
                       ?? throw new KeyNotFoundException($"Không tìm thấy phiếu với Id = {model.VoucherId}");
             }
 
-            obj.StoreId              = model.StoreId ?? User.StoreId
-                                       ?? throw new InvalidOperationException("Không xác định được chi nhánh. Vui lòng đăng nhập lại.");
+            // Xác định chi nhánh: ưu tiên model → JWT → hợp đồng liên quan
+            Guid? resolvedStoreId = model.StoreId ?? User.StoreId;
+            if (!resolvedStoreId.HasValue && model.LoanContractId.HasValue)
+            {
+                resolvedStoreId = await DbContext.LoanContracts
+                    .Where(c => c.LoanContractId == model.LoanContractId.Value)
+                    .Select(c => (Guid?)c.StoreId)
+                    .FirstOrDefaultAsync();
+            }
+            obj.StoreId              = resolvedStoreId
+                                       ?? throw new InvalidOperationException("Không xác định được chi nhánh. Vui lòng chọn chi nhánh hoặc liên kết hợp đồng.");
             obj.VoucherType          = model.VoucherType;
             obj.ReasonCode           = model.ReasonCode;
             obj.BusinessDate         = model.BusinessDate;
@@ -100,6 +109,9 @@ namespace CrediFlow.API.Services
             obj.Amount               = model.Amount;
             obj.Description          = model.Description;
             obj.IsAdjustment         = model.IsAdjustment;
+            obj.PaymentMethod        = model.PaymentMethod;
+            obj.BankName             = model.BankName;
+            obj.BankAccountNumber    = model.BankAccountNumber;
 
             await DbContext.SaveChangesAsync();
             return obj;
@@ -407,6 +419,9 @@ namespace CrediFlow.API.Services
                     ContractNo = v.LoanContract != null ? v.LoanContract.ContractNo : null,
                     v.CreatedAt,
                     v.CreatedBy,
+                    v.PaymentMethod,
+                    v.BankName,
+                    v.BankAccountNumber,
                 })
                 .ToArrayAsync();
             return new { Total = total, PageIndex = pageIndex, PageSize = pageSize, Items = items };

@@ -336,7 +336,6 @@ public partial class CrediflowContext : DbContext
             entity.Property(e => e.VoucherNo).HasColumnName("voucher_no");
             entity.Property(e => e.VoucherType).HasColumnName("voucher_type");
             entity.Property(e => e.PaymentMethod)
-                .HasDefaultValueSql("'CASH'::text")
                 .HasColumnName("payment_method");
             entity.Property(e => e.BankName).HasColumnName("bank_name");
             entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");

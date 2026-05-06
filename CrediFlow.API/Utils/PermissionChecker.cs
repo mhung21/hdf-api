@@ -26,6 +26,31 @@ public static class PermissionChecker
         cache.Remove($"user_perms:{userId}");
     }
 
+    /// <summary>Xóa cache quyền của tất cả user thuộc một role.</summary>
+    public static async Task InvalidateRolePermissionCachesAsync(
+        CrediflowContext db, ICachingHelper cache, string roleCode)
+    {
+        var userIds = await db.AppUsers
+            .AsNoTracking()
+            .Where(u => u.RoleCode == roleCode)
+            .Select(u => u.UserId)
+            .ToListAsync();
+        foreach (var uid in userIds)
+            cache.Remove($"user_perms:{uid}");
+    }
+
+    /// <summary>Xóa cache quyền của TẤT CẢ user trong hệ thống.</summary>
+    public static async Task InvalidateAllPermissionCachesAsync(
+        CrediflowContext db, ICachingHelper cache)
+    {
+        var userIds = await db.AppUsers
+            .AsNoTracking()
+            .Select(u => u.UserId)
+            .ToListAsync();
+        foreach (var uid in userIds)
+            cache.Remove($"user_perms:{uid}");
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Private helpers
     // ──────────────────────────────────────────────────────────────────────────
@@ -60,24 +85,11 @@ public static class PermissionChecker
             select p.PermissionCode
         ).Distinct().ToListAsync();
 
-        // 3. Ghi đè per-user (user_permissions: có thể cấp thêm hoặc thu hồi)
-        var overrides = await db.UserPermissions
-            .AsNoTracking()
-            .Where(up => up.UserId == userId)
-            .Join(
-                db.Permissions.Where(p => p.IsActive),
-                up => up.PermissionId,
-                p  => p.PermissionId,
-                (up, p) => new { p.PermissionCode, up.IsGranted })
-            .ToListAsync();
-
+        // Gộp: role_permissions + custom_role_permissions
+        // Không dùng user_permissions (override per-user) vì không có UI quản lý
+        // và chứa dữ liệu thừa gây conflict
         var merged = new HashSet<string>(rolePerms);
         merged.UnionWith(customPerms);
-        foreach (var ovr in overrides)
-        {
-            if (ovr.IsGranted) merged.Add(ovr.PermissionCode);
-            else               merged.Remove(ovr.PermissionCode);
-        }
 
         cache.Set(cacheKey, merged.ToList(), TimeSpan.FromMinutes(CacheTtlMinutes));
         return merged;

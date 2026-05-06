@@ -88,6 +88,15 @@ namespace CrediFlow.API.Controllers
             {
                 return Ok(ResultAPI.Error(null, ex.Message, 404));
             }
+            catch (InvalidOperationException ex)
+            {
+                return Ok(ResultAPI.Error(null, ex.Message, 400));
+            }
+            catch (Exception ex)
+            {
+                var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                return Ok(ResultAPI.Error(null, $"Lỗi khi lưu phiếu: {innerMsg}"));
+            }
         }
 
         // POST api/CashVoucher/CollectLoanPayment

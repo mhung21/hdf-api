@@ -308,9 +308,16 @@ namespace CrediFlow.API.Services
                     "Chỉ quản lý cửa hàng hoặc admin mới có quyền chuyển giao khách hàng.");
 
             var obj = await DbContext.Customers
-                      .Include(c => c.FirstStore)
                       .FirstOrDefaultAsync(c => c.CustomerId == customerId)
                       ?? throw new KeyNotFoundException($"Không tìm thấy khách hàng với Id = {customerId}");
+
+            // Lấy tên chi nhánh cũ cho audit log
+            string? oldStoreName = obj.FirstStoreId.HasValue
+                ? await DbContext.Stores
+                    .Where(s => s.StoreId == obj.FirstStoreId.Value)
+                    .Select(s => s.StoreName)
+                    .FirstOrDefaultAsync()
+                : null;
 
             // StoreManager chỉ chuyển giao trong phạm vi cửa hàng mình
             if (!User.IsAdmin)
@@ -327,14 +334,17 @@ namespace CrediFlow.API.Services
                 .FirstOrDefaultAsync(u => u.UserId == targetUserId)
                 ?? throw new KeyNotFoundException($"Không tìm thấy nhân viên với Id = {targetUserId}");
 
+            if (!targetUser.StoreId.HasValue || !User.IsAdmin)
+                throw new InvalidOperationException(
+                    $"Nhân viên '{targetUser.FullName}' chưa được gán chi nhánh, không thể chuyển giao.");
+
             // Snapshot dữ liệu cũ để ghi log
             var oldAssignedUserId = obj.AssignedToUserId;
             var oldStoreId = obj.FirstStoreId;
-            var oldStoreName = obj.FirstStore?.StoreName;
 
             // Cập nhật người phụ trách + chi nhánh của khách hàng
             obj.AssignedToUserId = targetUserId;
-            obj.FirstStoreId = targetUser.StoreId ?? obj.FirstStoreId;
+            obj.FirstStoreId = targetUser.StoreId.Value;
             obj.UpdatedAt = DateTime.Now;
 
             // Chuyển giao toàn bộ hợp đồng vay của khách hàng sang nhân viên mới + chi nhánh mới
@@ -345,8 +355,7 @@ namespace CrediFlow.API.Services
             foreach (var contract in contracts)
             {
                 contract.AssignedToUserId = targetUserId;
-                if (targetUser.StoreId.HasValue)
-                    contract.StoreId = targetUser.StoreId.Value;
+                contract.StoreId = targetUser.StoreId.Value;
                 contract.UpdatedAt = DateTime.Now;
             }
 

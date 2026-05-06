@@ -132,6 +132,11 @@ namespace CrediFlow.API.Controllers
             {
                 return Ok(ResultAPI.Error(null, ex.Message, 403));
             }
+            catch (Exception ex)
+            {
+                var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                return Ok(ResultAPI.Error(null, $"Lỗi khi chuyển giao khách hàng: {innerMsg}"));
+            }
         }
     }
 

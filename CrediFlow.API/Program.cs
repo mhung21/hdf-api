@@ -113,10 +113,7 @@ builder.Services.AddCors(options =>
                 "https://localhost:4200",
                 "https://quanly.hdfinanceco.vn",
                 "https://quanly-dev.hdfinanceco.vn",    // Test domain
-                "https://localhost:4200",
-                "http://103.176.179.103:8080",    // Test frontend
-                "http://103.176.179.103:8883",    // Test API
-                "http://103.176.179.103:8884")    // Test Identity
+                "https://localhost:4200")    // Test Identity
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials());

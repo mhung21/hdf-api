@@ -154,4 +154,11 @@ namespace CrediFlow.API.Models
         public const string OtherIncome              = "OTHER_INCOME";
         public const string OtherExpense             = "OTHER_EXPENSE";
     }
+
+    /// <summary>Tên chi nhánh hệ thống.</summary>
+    public static class StoreName
+    {
+        /// <summary>Chi nhánh gốc – gán tự động cho ADMIN / REGIONAL_MANAGER.</summary>
+        public const string Headquarters = "Tổng công ty";
+    }
 }
