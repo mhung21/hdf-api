@@ -163,15 +163,67 @@ namespace CrediFlow.API.Services
 
             bool isEarly = completionRatio < 80m;
 
-            // Gồp số tiền còn nợ từ lịch trả nợ (query riêng, không Include)
-            var unpaidSchedules = await DbContext.LoanRepaymentSchedules
-                .Where(s => s.LoanContractId == loanContractId && s.StatusCode != ScheduleStatus.Paid)
+            // Gộp số tiền còn nợ từ lịch trả nợ (tất cả các kỳ)
+            var schedules = await DbContext.LoanRepaymentSchedules
+                .Where(s => s.LoanContractId == loanContractId)
+                .OrderBy(s => s.PeriodNo)
                 .ToListAsync();
 
-            decimal remainingPrincipal  = unpaidSchedules.Sum(s => s.OpeningPrincipalAmount - s.PaidPrincipalAmount);
-            decimal accruedInterest     = unpaidSchedules.Sum(s => s.DueInterestAmount      - s.PaidInterestAmount);
-            decimal accruedFee          = unpaidSchedules.Sum(s => s.DuePeriodicFeeAmount   - s.PaidPeriodicFeeAmount);
-            decimal unpaidLatePenalty   = unpaidSchedules.Sum(s => s.DueLatePenaltyAmount   - s.PaidLatePenaltyAmount);
+            var isPawn = contract.ContractType == "PAWN";
+            
+            // Tìm gốc còn lại từ kỳ chưa trả đầu tiên
+            var firstUnpaid = schedules.FirstOrDefault(s => s.StatusCode != ScheduleStatus.Paid);
+            decimal remainingPrincipal = firstUnpaid?.OpeningPrincipalAmount ?? contract.PrincipalAmount;
+
+            decimal accruedInterest = 0m;
+            decimal accruedFee = 0m;
+            decimal unpaidLatePenalty = 0m;
+
+            foreach (var row in schedules)
+            {
+                if (row.DueDate < settlementDate)
+                {
+                    // Kỳ đã qua hạn hoàn toàn
+                    accruedInterest += row.DueInterestAmount - row.PaidInterestAmount;
+                    accruedFee += row.DuePeriodicFeeAmount - row.PaidPeriodicFeeAmount;
+                    unpaidLatePenalty += row.DueLatePenaltyAmount - row.PaidLatePenaltyAmount;
+                }
+                else if (row.PeriodFromDate <= settlementDate)
+                {
+                    // Kỳ hiện tại đang chạy
+                    int daysElapsed = Math.Max(1, settlementDate.DayNumber - row.PeriodFromDate.DayNumber);
+                    decimal proratedInterest = 0m;
+                    decimal proratedFee = 0m;
+
+                    if (isPawn)
+                    {
+                        decimal dailyInterestRate = contract.PawnInterestAmountPerMillionPerDaySnapshot / 1_000_000m;
+                        decimal dailyFeeRate = contract.PawnFeeAmountPerMillionPerDaySnapshot / 1_000_000m;
+                        decimal opening = row.OpeningPrincipalAmount > 0 ? row.OpeningPrincipalAmount : remainingPrincipal;
+
+                        proratedInterest = Math.Round(opening * dailyInterestRate * daysElapsed, 0);
+                        proratedFee = Math.Round(opening * dailyFeeRate * daysElapsed, 0);
+                    }
+                    else
+                    {
+                        int daysInPeriod = Math.Max(1, row.ActualDayCount);
+                        decimal ratio = Math.Min(1m, (decimal)daysElapsed / daysInPeriod);
+                        proratedInterest = Math.Round(row.DueInterestAmount * ratio, 0);
+                        proratedFee = Math.Round(row.DuePeriodicFeeAmount * ratio, 0);
+                    }
+
+                    accruedInterest += proratedInterest - row.PaidInterestAmount;
+                    accruedFee += proratedFee - row.PaidPeriodicFeeAmount;
+                    unpaidLatePenalty += row.DueLatePenaltyAmount - row.PaidLatePenaltyAmount;
+                }
+                else
+                {
+                    // Kỳ tương lai: hoàn trả toàn bộ số tiền đã đóng trước
+                    accruedInterest -= row.PaidInterestAmount;
+                    accruedFee -= row.PaidPeriodicFeeAmount;
+                    unpaidLatePenalty -= row.PaidLatePenaltyAmount;
+                }
+            }
 
             // Phạt tất toán sớm (có thể cấu hình qua EarlySettlementPenaltyRateSnapshot)
             decimal earlyPenalty = isEarly

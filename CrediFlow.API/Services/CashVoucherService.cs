@@ -134,7 +134,7 @@ namespace CrediFlow.API.Services
             var purposes = reason switch
             {
                 "LOAN_COLLECTION" or "INSTALLMENT_COLLECTION" or "BAD_DEBT_RECOVERY"
-                    => new List<string> { "INTEREST", "PERIODIC_FEE", "LATE_PENALTY", "PRINCIPAL" },
+                    => new List<string> { "INTEREST", "QLKV_FEE", "QLTS_FEE", "LATE_PENALTY", "PRINCIPAL" },
 
                 "UPFRONT_FEE_COLLECTION"
                     => new List<string> { "FILE_FEE", "INSURANCE" },
@@ -230,8 +230,9 @@ namespace CrediFlow.API.Services
                 (string component, Func<LoanRepaymentSchedule, decimal> due, Action<LoanRepaymentSchedule, decimal> apply)[] steps =
                 [
                     ("INTEREST",     s => s.DueInterestAmount     - s.PaidInterestAmount,     (s, v) => s.PaidInterestAmount     += v),
-                    ("PERIODIC_FEE", s => s.DuePeriodicFeeAmount  - s.PaidPeriodicFeeAmount,  (s, v) => s.PaidPeriodicFeeAmount  += v),
-                    ("LATE_PENALTY", s => s.DueLatePenaltyAmount   - s.PaidLatePenaltyAmount,  (s, v) => s.PaidLatePenaltyAmount  += v),
+                    ("QLKV_FEE",     s => s.DueQlkvAmount         - s.PaidQlkvAmount,         (s, v) => { s.PaidQlkvAmount += v; s.PaidPeriodicFeeAmount += v; }),
+                    ("QLTS_FEE",     s => s.DueQltsAmount         - s.PaidQltsAmount,         (s, v) => { s.PaidQltsAmount += v; s.PaidPeriodicFeeAmount += v; }),
+                    ("LATE_PENALTY", s => s.DueLatePenaltyAmount  - s.PaidLatePenaltyAmount,  (s, v) => s.PaidLatePenaltyAmount  += v),
                     ("PRINCIPAL",    s => s.DuePrincipalAmount     - s.PaidPrincipalAmount,    (s, v) => s.PaidPrincipalAmount    += v),
                 ];
 
@@ -354,6 +355,9 @@ namespace CrediFlow.API.Services
         /// <summary>Cập nhật StatusCode kỳ dựa trên số đã trả.</summary>
         private static void UpdateScheduleStatus(LoanRepaymentSchedule s)
         {
+            // Sync PaidPeriodicFeeAmount with Qlkv and Qlts to ensure backward compatibility and total calculation
+            s.PaidPeriodicFeeAmount = s.PaidQlkvAmount + s.PaidQltsAmount;
+
             bool allPaid = s.PaidPrincipalAmount >= s.DuePrincipalAmount
                         && s.PaidInterestAmount  >= s.DueInterestAmount
                         && s.PaidPeriodicFeeAmount >= s.DuePeriodicFeeAmount

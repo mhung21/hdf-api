@@ -51,6 +51,12 @@ namespace CrediFlow.API.Services
             if (storeScopeIds is not null)
                 query = query.Where(c => c.FirstStoreId.HasValue && storeScopeIds.Contains(c.FirstStoreId.Value));
 
+            if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
+            {
+                var staffId = CommonLib.GetGUID(User.UserId);
+                query = query.Where(c => c.CreatedBy == staffId || c.AssignedToUserId == staffId);
+            }
+
             var list = await query
                 .OrderBy(c => c.FullName)
                 .ToListAsync();
@@ -161,6 +167,12 @@ namespace CrediFlow.API.Services
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
                 query = query.Where(c => c.FirstStoreId.HasValue && storeScopeIds.Contains(c.FirstStoreId.Value));
+
+            if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
+            {
+                var staffId = CommonLib.GetGUID(User.UserId);
+                query = query.Where(c => c.CreatedBy == staffId || c.AssignedToUserId == staffId);
+            }
 
             if (filterStoreIds != null && filterStoreIds.Count > 0)
                 query = query.Where(c => c.FirstStoreId.HasValue && filterStoreIds.Contains(c.FirstStoreId.Value));

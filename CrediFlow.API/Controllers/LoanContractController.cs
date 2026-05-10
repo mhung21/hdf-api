@@ -124,6 +124,7 @@ namespace CrediFlow.API.Controllers
         [HttpPost]
         public async Task<ActionResult<ResultAPI>> GetRepaymentSchedule([FromBody] Guid loanContractId)
         {
+            await _loanContractService.SyncScheduleForShortPaymentAsync(loanContractId);
             var rs = await _loanContractService.GetRepaymentSchedule(loanContractId);
             return Ok(ResultAPI.Success(rs));
         }

@@ -60,6 +60,20 @@ namespace CrediFlow.API.Controllers
             return Ok(ResultAPI.Success(rs));
         }
 
+        // POST api/Report/OutstandingLoansPaged
+        /// <summary>Danh sách khoản vay có phân trang và lọc theo cửa hàng, khách hàng.</summary>
+        [HttpPost]
+        public async Task<ActionResult<ResultAPI>> OutstandingLoansPaged([FromBody] OutstandingLoansPagedRequest request)
+        {
+            if (!CanViewDashboardSnapshot())
+                return Ok(ResultAPI.ResultWithAccessDenined());
+
+            var rs = await _reportService.GetOutstandingLoansPaged(request);
+            await _dataAccessLog.LogAsync("REPORT_OUTSTANDING_LOANS_PAGED", null, "VIEW",
+                queryParams: $"storeId={request.StoreId}&keyword={request.Keyword}&page={request.PageIndex}&size={request.PageSize}");
+            return Ok(ResultAPI.Success(rs));
+        }
+
         // POST api/Report/CustomerStats
         /// <summary>Thống kê khách CTV / Vãng lai / Cũ theo ngày, tuần, tháng.</summary>
         [HttpPost]
@@ -210,6 +224,16 @@ namespace CrediFlow.API.Controllers
     public class ReportStoreRequest
     {
         public Guid? StoreId { get; set; }
+    }
+
+    public class OutstandingLoansPagedRequest
+    {
+        public Guid? StoreId { get; set; }
+        public string? Keyword { get; set; }
+        public DateOnly? FromDate { get; set; }
+        public DateOnly? ToDate { get; set; }
+        public int PageIndex { get; set; } = 1;
+        public int PageSize { get; set; } = 20;
     }
 
     public class CustomerStatsRequest

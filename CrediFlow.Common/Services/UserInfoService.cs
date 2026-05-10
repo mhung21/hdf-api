@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 
@@ -20,7 +20,7 @@ namespace CrediFlow.Common.Services
         /// <summary>Danh sách chi nhánh mà Quản lý vùng được phân công (rỗng với vai trò khác).</summary>
         IReadOnlyList<Guid> AssignedStoreIds { get; }
         /// <summary>Danh sách chi nhánh user được phép truy cập. Null = toàn bộ chi nhánh (Admin, không lọc).</summary>
-        IReadOnlyList<Guid>? GetStoreScopeIds(Guid? requestedStoreId = null);
+        List<Guid>? GetStoreScopeIds(Guid? requestedStoreId = null);
     }
 
     public class UserInfoService : IUserInfoService
@@ -96,20 +96,20 @@ namespace CrediFlow.Common.Services
                 .Select(g => g!.Value)
                 .ToList();
 
-        public IReadOnlyList<Guid>? GetStoreScopeIds(Guid? requestedStoreId = null)
+        public List<Guid>? GetStoreScopeIds(Guid? requestedStoreId = null)
         {
             if (IsAdmin)
             {
-                return requestedStoreId.HasValue ? [requestedStoreId.Value] : null;
+                return requestedStoreId.HasValue ? new List<Guid> { requestedStoreId.Value } : null;
             }
 
             var scopeIds = IsRegionalManager
                 ? AssignedStoreIds.ToList()
-                : StoreId.HasValue ? [StoreId.Value] : [];
+                : StoreId.HasValue ? new List<Guid> { StoreId.Value } : new List<Guid>();
 
             if (requestedStoreId.HasValue)
             {
-                return scopeIds.Contains(requestedStoreId.Value) ? [requestedStoreId.Value] : [];
+                return scopeIds.Contains(requestedStoreId.Value) ? new List<Guid> { requestedStoreId.Value } : new List<Guid>();
             }
 
             return scopeIds;

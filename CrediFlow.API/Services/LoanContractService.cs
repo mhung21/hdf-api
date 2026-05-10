@@ -54,6 +54,9 @@ namespace CrediFlow.API.Services
 
         /// <summary>Chuyển giao hợp đồng cho nhân viên khác phụ trách (chỉ Manager/Admin).</summary>
         Task<LoanContract> AssignLoanContract(Guid loanContractId, Guid targetUserId);
+
+        /// <summary>Tự động tính lại PMT cho các kỳ tương lai nếu kỳ vừa qua đóng thiếu gốc.</summary>
+        Task<bool> SyncScheduleForShortPaymentAsync(Guid loanContractId);
     }
 
     // DTO cho calculator
@@ -175,7 +178,7 @@ namespace CrediFlow.API.Services
 
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
-                query = query.Where(c => storeScopeIds.Any(id => id == c.StoreId));
+                query = query.Where(c => storeScopeIds.Contains(c.StoreId));
 
             // Staff chỉ thấy hợp đồng mình tạo hoặc được gán phụ trách
             if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
@@ -464,7 +467,7 @@ namespace CrediFlow.API.Services
 
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
-                query = query.Where(c => storeScopeIds.Any(id => id == c.StoreId));
+                query = query.Where(c => storeScopeIds.Contains(c.StoreId));
 
             // Staff chỉ thấy hợp đồng mình tạo hoặc được gán phụ trách
             if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
@@ -690,32 +693,34 @@ namespace CrediFlow.API.Services
                 totalActualDays += days;
             }
 
-            // Bước 2: Quy đổi theo ngày thực tế với mốc 30 ngày/tháng
-            decimal dailyInterestRate = monthlyInterestRate / 30m;
-            decimal dailyQlkvRate     = monthlyQlkvRate     / 30m;
-            decimal dailyQltsRate     = monthlyQltsRate     / 30m;
-
             var result = new LoanCalculationResult { InstallmentAmount = Math.Round(pmt, 0) };
             decimal balance = P;
+
+            decimal dailyInterestRate = totalActualDays == 0 ? 0 : (monthlyInterestRate * n) / totalActualDays;
+            decimal dailyQlkvRate     = totalActualDays == 0 ? 0 : (monthlyQlkvRate * n) / totalActualDays;
+            decimal dailyQltsRate     = totalActualDays == 0 ? 0 : (monthlyQltsRate * n) / totalActualDays;
 
             for (int i = 0; i < n; i++)
             {
                 var (periodFrom, periodTo, periodDays) = periodDates[i];
                 bool isLastPeriod = (i == n - 1);
 
-                decimal interest = balance * dailyInterestRate * periodDays;
-                decimal qlkv     = balance * dailyQlkvRate * periodDays;
-                decimal qlts     = balance * dailyQltsRate     * periodDays;
-                decimal totalFee = interest + qlkv + qlts + fixedMonthlyFeeAmount;
+                decimal interest = Math.Round(balance * dailyInterestRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                decimal qlkv     = Math.Round(balance * dailyQlkvRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                decimal qlts     = Math.Round(balance * dailyQltsRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                decimal fixedFee = Math.Round(fixedMonthlyFeeAmount, 0, MidpointRounding.AwayFromZero);
+                decimal totalFee = interest + qlkv + qlts + fixedFee;
 
                 // Gốc kỳ cuối = toàn bộ nợ còn lại; các kỳ khác = PMT – lãi – phí (làm tròn VNĐ)
                 decimal principal = isLastPeriod
                     ? balance
-                    : Math.Round(pmt - totalFee, 0);
+                    : Math.Round(pmt - totalFee, 0, MidpointRounding.AwayFromZero);
 
                 if (principal < 0) principal = 0;
                 decimal closing = balance - principal;
                 if (closing < 0) closing = 0;
+
+                decimal installmentAmt = isLastPeriod ? (principal + totalFee) : Math.Round(pmt, 0, MidpointRounding.AwayFromZero);
 
                 result.Schedule.Add(new LoanSchedulePreviewItem
                 {
@@ -724,20 +729,20 @@ namespace CrediFlow.API.Services
                     ToDate           = periodTo,
                     DayCount         = periodDays,
                     OpeningPrincipal = balance,
-                    DueInterest      = Math.Round(interest, 0),
-                    DueQlkv          = Math.Round(qlkv, 0),
-                    DueFixedMonthlyFee = Math.Round(fixedMonthlyFeeAmount, 0),
-                    DueQlts          = Math.Round(qlts, 0),
+                    DueInterest      = interest,
+                    DueQlkv          = qlkv,
+                    DueFixedMonthlyFee = fixedFee,
+                    DueQlts          = qlts,
                     DuePrincipal     = principal,
-                    // Cột "Tiền TT hàng kỳ" phải bám PMT cố định như Excel -PMT
-                    Installment      = Math.Round(pmt, 0),
+                    // Cột "Tiền TT hàng kỳ" phải bám PMT cố định như Excel, riêng kỳ cuối điều chỉnh số lẻ
+                    Installment      = installmentAmt,
                     ClosingPrincipal = closing,
                 });
 
                 result.TotalInterest  += interest;
                 result.TotalQlkv      += qlkv;
                 result.TotalQlts      += qlts;
-                result.TotalFixedMonthlyFee += fixedMonthlyFeeAmount;
+                result.TotalFixedMonthlyFee += fixedFee;
                 result.TotalPrincipal += principal;
 
                 balance = closing;
@@ -870,7 +875,8 @@ namespace CrediFlow.API.Services
             switch (toStatus)
             {
                 case LoanContractStatus.PendingDisbursement when fromStatus == LoanContractStatus.PendingApproval:
-                    obj.ApprovedDate = DateOnly.FromDateTime(now);
+                    var approvedDate = DateOnly.FromDateTime(now);
+                    obj.ApprovedDate = approvedDate < obj.ApplicationDate ? obj.ApplicationDate : approvedDate;
                     obj.ApprovedBy = userId;
                     break;
 
@@ -1170,6 +1176,111 @@ namespace CrediFlow.API.Services
             return schedules;
         }
 
+        // ──────────────────────────────────────────────────────────────────────
+        // SyncScheduleForShortPaymentAsync – tính lại PMT nếu đóng thiếu gốc
+        // ──────────────────────────────────────────────────────────────────────
+        public async Task<bool> SyncScheduleForShortPaymentAsync(Guid loanContractId)
+        {
+            var contract = await DbContext.LoanContracts
+                .FirstOrDefaultAsync(c => c.LoanContractId == loanContractId);
+            if (contract == null) return false;
+
+            if (contract.ContractType == LoanContractType.Pawn) return false; // Cầm đồ không dùng PMT gốc giảm dần
+            
+            var schedules = await DbContext.LoanRepaymentSchedules
+                .Where(s => s.LoanContractId == loanContractId)
+                .OrderBy(s => s.PeriodNo)
+                .ToListAsync();
+
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            
+            // Tìm kỳ đã qua hạn gần nhất
+            var lastPastDuePeriod = schedules
+                .Where(s => s.DueDate <= today)
+                .OrderByDescending(s => s.PeriodNo)
+                .FirstOrDefault();
+
+            if (lastPastDuePeriod == null) return false;
+
+            // Kiểm tra xem kỳ này có đóng thiếu gốc không
+            if (lastPastDuePeriod.PaidPrincipalAmount < lastPastDuePeriod.DuePrincipalAmount)
+            {
+                var futureSchedules = schedules.Where(s => s.PeriodNo > lastPastDuePeriod.PeriodNo).ToList();
+                if (!futureSchedules.Any()) return false;
+
+                // Tính tổng gốc đã trả đến kỳ này
+                decimal totalPaidPrincipal = schedules
+                    .Where(s => s.PeriodNo <= lastPastDuePeriod.PeriodNo)
+                    .Sum(s => s.PaidPrincipalAmount);
+                
+                decimal remainingPrincipal = (contract.PrincipalAmount + contract.InsuranceAmountSnapshot) - totalPaidPrincipal;
+
+                if (remainingPrincipal <= 0) return false;
+
+                // Lấy snapshot gốc opening của kỳ tiếp theo hiện tại (để xem có trùng khớp không, tránh save dư thừa)
+                decimal currentNextOpening = futureSchedules.First().OpeningPrincipalAmount;
+                if (Math.Round(currentNextOpening, 0) == Math.Round(remainingPrincipal, 0)) return false; // Đã đồng bộ rồi
+
+                // Bắt đầu tính PMT lại
+                int remainingPeriods = futureSchedules.Count;
+                decimal monthlyInterestRate = contract.InterestRateMonthlySnapshot / 100m;
+                decimal monthlyQlkvRate     = contract.QlkvRateMonthlySnapshot / 100m;
+                decimal monthlyQltsRate     = contract.QltsRateMonthlySnapshot / 100m;
+                decimal fixedMonthlyFee     = Math.Max(0, contract.FixedMonthlyFeeAmountSnapshot);
+                decimal rCombined = monthlyInterestRate + monthlyQlkvRate + monthlyQltsRate;
+
+                decimal power = (decimal)Math.Pow((double)(1 + rCombined), remainingPeriods);
+                decimal pmtBase = rCombined == 0 ? remainingPrincipal / remainingPeriods
+                                : remainingPrincipal * rCombined * power / (power - 1);
+                decimal pmt = Math.Round(pmtBase + fixedMonthlyFee, 0);
+
+                int remainingActualDays = futureSchedules.Sum(s => s.ActualDayCount > 0 ? s.ActualDayCount : 30);
+                decimal dailyInterestRate = remainingActualDays == 0 ? 0 : (monthlyInterestRate * remainingPeriods) / remainingActualDays;
+                decimal dailyQlkvRate     = remainingActualDays == 0 ? 0 : (monthlyQlkvRate * remainingPeriods) / remainingActualDays;
+                decimal dailyQltsRate     = remainingActualDays == 0 ? 0 : (monthlyQltsRate * remainingPeriods) / remainingActualDays;
+
+                decimal balance = remainingPrincipal;
+
+                for (int i = 0; i < remainingPeriods; i++)
+                {
+                    var row = futureSchedules[i];
+                    bool isLastPeriod = (i == remainingPeriods - 1);
+                    int periodDays = row.ActualDayCount > 0 ? row.ActualDayCount : 30;
+
+                    decimal interest = Math.Round(balance * dailyInterestRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                    decimal qlkv     = Math.Round(balance * dailyQlkvRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                    decimal qlts     = Math.Round(balance * dailyQltsRate * periodDays, 0, MidpointRounding.AwayFromZero);
+                    decimal fixedFee = Math.Round(fixedMonthlyFee, 0, MidpointRounding.AwayFromZero);
+                    decimal totalFee = interest + qlkv + qlts + fixedFee;
+
+                    decimal principal = isLastPeriod ? balance : Math.Round(pmt - totalFee, 0, MidpointRounding.AwayFromZero);
+                    if (principal < 0) principal = 0;
+                    
+                    decimal closing = balance - principal;
+                    if (closing < 0) closing = 0;
+
+                    decimal installmentAmt = isLastPeriod ? (principal + totalFee) : Math.Round(pmt, 0, MidpointRounding.AwayFromZero);
+
+                    row.OpeningPrincipalAmount = balance;
+                    row.DueInterestAmount = interest;
+                    row.DueQlkvAmount = qlkv;
+                    row.DueQltsAmount = qlts;
+                    row.DuePeriodicFeeAmount = qlkv + qlts + fixedFee;
+                    row.DuePrincipalAmount = principal;
+                    row.InstallmentAmount = installmentAmt;
+                    row.ClosingPrincipalAmount = closing;
+                    row.UpdatedAt = DateTime.Now;
+
+                    balance = closing;
+                }
+
+                await DbContext.SaveChangesAsync();
+                return true;
+            }
+
+            return false;
+        }
+
         // ───────────────────────────────────────────────────────────────────────────────
         // GetFinancialSummary – tóm tắt tài chính của hợp đồng
         // ───────────────────────────────────────────────────────────────────────────────
@@ -1285,7 +1396,7 @@ namespace CrediFlow.API.Services
 
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
-                query = query.Where(v => storeScopeIds.Any(id => id == v.StoreId));
+                query = query.Where(v => v.StoreId.HasValue && storeScopeIds.Contains(v.StoreId.Value));
 
             if (minDaysOverdue.HasValue)
                 query = query.Where(v => v.DaysOverdue >= minDaysOverdue.Value);

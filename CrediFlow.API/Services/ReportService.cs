@@ -14,6 +14,9 @@ namespace CrediFlow.API.Services
         /// <summary>Danh sách hợp đồng đang thu (status DISBURSED) theo cửa hàng.</summary>
         Task<object> GetOutstandingLoans(Guid? storeId);
 
+        /// <summary>Danh sách hợp đồng đang thu có phân trang và tìm kiếm.</summary>
+        Task<object> GetOutstandingLoansPaged(CrediFlow.API.Controllers.OutstandingLoansPagedRequest request);
+
         /// <summary>Thống kê khách hàng mới/cũ/CTV theo ngày, tuần, hoặc tháng.</summary>
         Task<object> GetCustomerStats(Guid? storeId, DateOnly fromDate, DateOnly toDate, string groupBy);
 
@@ -119,6 +122,71 @@ namespace CrediFlow.API.Services
                 .ToListAsync();
 
             return rows;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Danh sách khoản vay đang thu (phân trang & tìm kiếm)
+        // ──────────────────────────────────────────────────────────────────────
+
+        public async Task<object> GetOutstandingLoansPaged(CrediFlow.API.Controllers.OutstandingLoansPagedRequest request)
+        {
+            var query = _dbContext.LoanContracts
+                .Where(c => c.StatusCode == "DISBURSED")
+                .AsQueryable();
+
+            var storeScopeIds = GetStoreScopeIds(request.StoreId);
+            if (storeScopeIds is not null)
+                query = query.Where(c => storeScopeIds.Any(id => id == c.StoreId));
+
+            if (!string.IsNullOrWhiteSpace(request.Keyword))
+            {
+                var keyword = request.Keyword.Trim().ToLower();
+                query = query.Where(c => 
+                    c.ContractNo.ToLower().Contains(keyword) || 
+                    c.Customer.FullName.ToLower().Contains(keyword) || 
+                    c.Customer.NationalId.ToLower().Contains(keyword));
+            }
+
+            if (request.FromDate.HasValue)
+                query = query.Where(c => c.DisbursementDate >= request.FromDate.Value);
+            
+            if (request.ToDate.HasValue)
+                query = query.Where(c => c.DisbursementDate <= request.ToDate.Value);
+
+            var totalCount = await query.CountAsync();
+
+            var itemsQuery = query
+                .Select(c => new
+                {
+                    LoanContractId    = c.LoanContractId,
+                    ContractCode      = c.ContractNo,
+                    CustomerName      = c.Customer.FullName,
+                    StoreId           = c.StoreId,
+                    StoreName         = c.Store.StoreName,
+                    PrincipalAmount   = c.PrincipalAmount + c.InsuranceAmountSnapshot,
+                    RemainingPrincipal = (c.PrincipalAmount + c.InsuranceAmountSnapshot)
+                                        - (c.LoanRepaymentSchedules.Sum(s => (decimal?)s.PaidPrincipalAmount) ?? 0),
+                    DisbursedDate     = c.DisbursementDate,
+                    MaturityDate      = c.MaturityDate,
+                    StatusCode        = c.StatusCode,
+                })
+                .OrderBy(r => r.MaturityDate); // sort by maturity date or store name
+
+            var totalOutstandingPrincipal = await itemsQuery.SumAsync(x => x.PrincipalAmount);
+            var totalRemainingPrincipal = await itemsQuery.SumAsync(x => x.RemainingPrincipal);
+
+            var items = await itemsQuery
+                .Skip((request.PageIndex - 1) * request.PageSize)
+                .Take(request.PageSize)
+                .ToListAsync();
+
+            return new
+            {
+                TotalCount = totalCount,
+                TotalOutstandingPrincipal = totalOutstandingPrincipal,
+                TotalRemainingPrincipal = totalRemainingPrincipal,
+                Items = items
+            };
         }
 
         // ──────────────────────────────────────────────────────────────────────
