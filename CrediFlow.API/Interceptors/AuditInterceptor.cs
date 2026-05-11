@@ -27,6 +27,7 @@ public class AuditInterceptor : SaveChangesInterceptor
         "user_login_histories",
         "user_sessions",
         "loan_status_histories",
+        "loan_contracts", // handled by AuditLogInterceptor
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new()

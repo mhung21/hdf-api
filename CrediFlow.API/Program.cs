@@ -6,8 +6,34 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using CrediFlow.API.Services;
 using Microsoft.OpenApi;
+using Serilog;
+using Serilog.Sinks.Grafana.Loki;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// =========================================================
+// SERILOG LOGGING
+// =========================================================
+var lokiUrl = builder.Configuration["Loki:Url"] ?? "http://hdf-loki:3100";
+
+builder.Host.UseSerilog((context, config) =>
+{
+    config
+        .ReadFrom.Configuration(context.Configuration)
+        .Enrich.FromLogContext()
+        .Enrich.WithProperty("service_name", "hdf-api")
+        .Enrich.WithProperty("environment", context.HostingEnvironment.EnvironmentName)
+        .WriteTo.Console()
+        .WriteTo.GrafanaLoki(
+            uri: lokiUrl,
+            labels: new List<LokiLabel>
+            {
+                new() { Key = "service_name", Value = "hdf-api" },
+                new() { Key = "environment", Value = context.HostingEnvironment.EnvironmentName }
+            },
+            propertiesAsLabels: new[] { "level" }
+        );
+});
 
 builder.Configuration.Bind(ConfigRoot.Config);
 
@@ -131,6 +157,10 @@ if (!app.Environment.IsProduction())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+// Serilog HTTP request logging (auto-log method, path, status code, duration)
+app.UseSerilogRequestLogging();
+
 // Log toàn bộ hệ thống (những chỗ không có try catch thì lỗi sẽ bắn vào đây) => Như vậy có thể bỏ hết try catch trên các controller đi
 //https://stackoverflow.com/questions/38630076/asp-net-core-web-api-exception-handling
 
@@ -139,27 +169,7 @@ app.UseExceptionHandler(a => a.Run(async context =>
     var exceptionHandlerPathFeature = context.Features.Get<IExceptionHandlerPathFeature>();
     var ex = exceptionHandlerPathFeature.Error;
 
-    Console.WriteLine($"Lỗi: {exceptionHandlerPathFeature.Path} - Message: {ex.Message} - InnerException: {ex.InnerException} - StackTrace: {ex.StackTrace}");
-
-    // var objLog = new
-    // {
-    //     ServiceName = "LASI api - " + builder.Configuration.GetValue("Scope:Environment", ""),
-    //     Source = ex.Source,
-    //     Path = exceptionHandlerPathFeature.Path,
-    //     Url = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.Path}",
-    //     Message = ex.Message,
-    //     InnerException = ex.InnerException?.ToString(),
-    //     StackTrace = ex.StackTrace,
-    //     Data = JsonConvert.SerializeObject(ex.Data)
-    // };
-
-    //TODO
-    //Lib.PushToLog(objLog);
-
-    // var result = CommonLib.ConvertObjectToJson(ResultAPI.Error(ex.Message));
-    // context.Response.StatusCode = 200;  // (int)HttpStatusCode.InternalServerError;
-    // context.Response.ContentType = "application/json";
-    // await context.Response.WriteAsync(result);
+    Log.Error(ex, "Unhandled exception at {Path}", exceptionHandlerPathFeature.Path);
 }));
 
 // Disabled: Nginx xử lý SSL/TLS (reverse proxy), app chỉ nhận HTTP từ proxy.

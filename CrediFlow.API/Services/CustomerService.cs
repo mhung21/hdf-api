@@ -46,16 +46,10 @@ namespace CrediFlow.API.Services
         {
             var query = DbContext.Customers.AsQueryable();
 
-            // Admin thấy tất cả; StoreManager thấy KH chi nhánh mình; Staff chỉ thấy KH được giao
+            // Admin thấy tất cả; các role khác chỉ thấy KH thuộc chi nhánh được phân quyền
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
                 query = query.Where(c => c.FirstStoreId.HasValue && storeScopeIds.Contains(c.FirstStoreId.Value));
-
-            if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
-            {
-                var staffId = CommonLib.GetGUID(User.UserId);
-                query = query.Where(c => c.CreatedBy == staffId || c.AssignedToUserId == staffId);
-            }
 
             var list = await query
                 .OrderBy(c => c.FullName)
@@ -163,16 +157,10 @@ namespace CrediFlow.API.Services
 
             var query = DbContext.Customers.AsQueryable();
 
-            // Admin thấy tất cả; StoreManager thấy KH chi nhánh mình; Staff chỉ thấy KH được giao
+            // Admin thấy tất cả; các role khác chỉ thấy KH thuộc chi nhánh được phân quyền
             var storeScopeIds = GetStoreScopeIds();
             if (storeScopeIds is not null)
                 query = query.Where(c => c.FirstStoreId.HasValue && storeScopeIds.Contains(c.FirstStoreId.Value));
-
-            if (!User.IsAdmin && !User.IsStoreManager && !User.IsRegionalManager)
-            {
-                var staffId = CommonLib.GetGUID(User.UserId);
-                query = query.Where(c => c.CreatedBy == staffId || c.AssignedToUserId == staffId);
-            }
 
             if (filterStoreIds != null && filterStoreIds.Count > 0)
                 query = query.Where(c => c.FirstStoreId.HasValue && filterStoreIds.Contains(c.FirstStoreId.Value));

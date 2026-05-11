@@ -49,6 +49,9 @@ namespace CrediFlow.API.Services
         /// <summary>Lịch sử thay đổi trạng thái hợp đồng (sắp xếp theo thời gian).</summary>
         Task<IList<LoanStatusHistory>> GetStatusHistory(Guid loanContractId);
 
+        /// <summary>Lịch sử thao tác hợp đồng (AuditLogs).</summary>
+        Task<IList<AuditLogDto>> GetAuditLogs(Guid loanContractId);
+
         /// <summary>Tóm tắt tài chính của hợp đồng: tổng giải ngân, đã thu, còn lại, lãi/phí/phạt.</summary>
         Task<object> GetFinancialSummary(Guid loanContractId);
 
@@ -57,6 +60,9 @@ namespace CrediFlow.API.Services
 
         /// <summary>Tự động tính lại PMT cho các kỳ tương lai nếu kỳ vừa qua đóng thiếu gốc.</summary>
         Task<bool> SyncScheduleForShortPaymentAsync(Guid loanContractId);
+
+        /// <summary>Tính toán lại lịch trả nợ cho tất cả các hợp đồng trả góp chưa có bất kỳ thanh toán nào.</summary>
+        Task<int> RecalculateAllPendingSchedulesAsync();
     }
 
     // DTO cho calculator
@@ -510,10 +516,21 @@ namespace CrediFlow.API.Services
             if (filterStoreIds != null && filterStoreIds.Any())
                 query = query.Where(c => filterStoreIds.Contains(c.StoreId));
 
-            int total = await query.CountAsync();
-            decimal sumPrincipal = await query.SumAsync(c => c.PrincipalAmount);
-            decimal sumInsurance = await query.SumAsync(c => c.InsuranceAmountSnapshot);
-            decimal sumFileFee   = await query.SumAsync(c => c.FileFeeAmountSnapshot);
+            var aggregates = await query
+                .GroupBy(c => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    SumPrincipal = g.Sum(c => c.PrincipalAmount),
+                    SumInsurance = g.Sum(c => c.InsuranceAmountSnapshot),
+                    SumFileFee   = g.Sum(c => c.FileFeeAmountSnapshot)
+                })
+                .FirstOrDefaultAsync();
+
+            int total = aggregates?.Total ?? 0;
+            decimal sumPrincipal = aggregates?.SumPrincipal ?? 0;
+            decimal sumInsurance = aggregates?.SumInsurance ?? 0;
+            decimal sumFileFee   = aggregates?.SumFileFee ?? 0;
 
             var sorted = (sortBy?.Trim().ToLower() ?? "contractno") switch
             {
@@ -521,6 +538,7 @@ namespace CrediFlow.API.Services
                 "applicationdate" => sortDesc ? query.OrderByDescending(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.ApplicationDate).ThenByDescending(c => c.CreatedAt),
                 "statuscode" => sortDesc ? query.OrderByDescending(c => c.StatusCode).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.StatusCode).ThenByDescending(c => c.CreatedAt),
                 "principalamount" => sortDesc ? query.OrderByDescending(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.PrincipalAmount).ThenByDescending(c => c.CreatedAt),
+                "updatedat" => sortDesc ? query.OrderByDescending(c => c.UpdatedAt).ThenByDescending(c => c.CreatedAt) : query.OrderBy(c => c.UpdatedAt).ThenByDescending(c => c.CreatedAt),
                 _ => sortDesc ? query.OrderByDescending(c => c.CreatedAt).ThenBy(c => c.LoanContractId) : query.OrderBy(c => c.CreatedAt).ThenBy(c => c.LoanContractId)
             };
 
@@ -562,6 +580,7 @@ namespace CrediFlow.API.Services
                     c.CreatedBy,
                     c.AssignedToUserId,
                     c.CreatedAt,
+                    c.UpdatedAt,
                     c.SettledAt,
                     c.CancelledAt,
                     c.CustomerSourceId,
@@ -1118,6 +1137,89 @@ namespace CrediFlow.API.Services
                 .ToListAsync();
         }
 
+        public async Task<IList<AuditLogDto>> GetAuditLogs(Guid loanContractId)
+        {
+            return await DbContext.ContractAuditLogs
+                .Include(a => a.ChangedByNavigation)
+                .Where(a => a.LoanContractId == loanContractId)
+                .OrderByDescending(a => a.ChangedAt)
+                .Select(a => new AuditLogDto
+                {
+                    AuditLogId = a.AuditLogId,
+                    TableName = "loan_contracts",
+                    ActionCode = a.ActionCode,
+                    OldData = a.OldData,
+                    NewData = a.NewData,
+                    ChangedAt = a.ChangedAt,
+                    ChangedBy = a.ChangedBy,
+                    ChangedByName = a.ChangedByNavigation != null ? (a.ChangedByNavigation.FullName ?? a.ChangedByNavigation.Username) : null
+                })
+                .ToListAsync();
+        }
+
+        public async Task<int> RecalculateAllPendingSchedulesAsync()
+        {
+            // TÃ¬m táº¥t cáº£ cÃ¡c há»£p Ä‘á»“ng tráº£ gÃ³p cÃ³ lá»‹ch tráº£ ná»£, nhÆ°ng CHÆ¯A CÃ“ báº¥t ká»³ ká»³ nÃ o Ä‘Ã£ thanh toÃ¡n (PAID hoáº·c PaidPrincipal > 0)
+            var eligibleContracts = await DbContext.LoanContracts
+                .Include(c => c.LoanRepaymentSchedules)
+                .Where(c => c.ContractType == LoanContractType.Installment
+                         && c.LoanRepaymentSchedules.Any()
+                         && !c.LoanRepaymentSchedules.Any(s => s.StatusCode == ScheduleStatus.Paid || s.PaidPrincipalAmount > 0))
+                .ToListAsync();
+
+            int updatedCount = 0;
+            foreach (var contract in eligibleContracts)
+            {
+                var request = new LoanCalculateRequest
+                {
+                    PrincipalAmount = contract.PrincipalAmount,
+                    TermMonths = contract.TermMonths,
+                    InterestRateMonthly = contract.InterestRateMonthlySnapshot,
+                    QlkvRateMonthly = contract.QlkvRateMonthlySnapshot,
+                    QltsRateMonthly = contract.QltsRateMonthlySnapshot,
+                    FixedMonthlyFeeAmount = contract.FixedMonthlyFeeAmountSnapshot,
+                    DisbursementDate = contract.DisbursementDate,
+                    InsuranceAmountSnapshot = contract.InsuranceAmountSnapshot
+                };
+
+                var calc = Calculate(request);
+
+                // XÃ³a lá»‹ch cÅ© vÃ  add lá»‹ch má»›i
+                DbContext.LoanRepaymentSchedules.RemoveRange(contract.LoanRepaymentSchedules);
+
+                foreach (var row in calc.Schedule)
+                {
+                    DbContext.LoanRepaymentSchedules.Add(new LoanRepaymentSchedule
+                    {
+                        ScheduleId             = Guid.CreateVersion7(),
+                        LoanContractId         = contract.LoanContractId,
+                        PeriodNo               = row.PeriodNo,
+                        PeriodFromDate         = row.FromDate ?? DateOnly.MinValue,
+                        PeriodToDate           = row.ToDate ?? DateOnly.MinValue,
+                        DueDate                = row.ToDate ?? DateOnly.MinValue, // Mặc định due date = to date
+                        ActualDayCount         = row.DayCount,
+                        OpeningPrincipalAmount = row.OpeningPrincipal,
+                        InstallmentAmount      = row.Installment,
+                        DuePrincipalAmount     = row.DuePrincipal,
+                        DueInterestAmount      = row.DueInterest,
+                        DueQlkvAmount          = row.DueQlkv,
+                        DueQltsAmount          = row.DueQlts,
+                        DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee,
+                        ClosingPrincipalAmount = row.ClosingPrincipal,
+                        StatusCode             = ScheduleStatus.Pending
+                    });
+                }
+                updatedCount++;
+            }
+
+            if (updatedCount > 0)
+            {
+                await DbContext.SaveChangesAsync();
+            }
+
+            return updatedCount;
+        }
+
         // ──────────────────────────────────────────────────────────────────────
         // GetRepaymentSchedule – lịch trả nợ của hợp đồng đã tạo
         // ──────────────────────────────────────────────────────────────────────
@@ -1447,34 +1549,6 @@ namespace CrediFlow.API.Services
             if (targetUser.StoreId.HasValue)
                 obj.StoreId = targetUser.StoreId.Value;
             obj.UpdatedAt = DateTime.Now;
-
-            // Ghi audit log chuyển giao
-            DbContext.AuditLogs.Add(new AuditLog
-            {
-                AuditLogId = Guid.CreateVersion7(),
-                TableName = "loan_contracts",
-                RecordId = loanContractId,
-                ActionCode = "ASSIGN",
-                OldData = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    AssignedToUserId = oldAssignedUserId,
-                    StoreId = oldStoreId,
-                    StoreName = oldStoreName,
-                }),
-                NewData = System.Text.Json.JsonSerializer.Serialize(new
-                {
-                    AssignedToUserId = targetUserId,
-                    StoreId = targetUser.StoreId,
-                    StoreName = targetUser.Store?.StoreName,
-                }),
-                ChangedBy = CommonLib.GetGUID(User.UserId),
-                ChangedAt = DateTime.Now,
-                LoanContractId = loanContractId,
-                StoreId = targetUser.StoreId,
-                Note = $"Chuyển giao HĐ '{obj.ContractNo}' " +
-                       $"từ CN '{oldStoreName}' sang CN '{targetUser.Store?.StoreName}' " +
-                       $"cho NV '{targetUser.FullName}'",
-            });
 
             await DbContext.SaveChangesAsync();
             return obj;

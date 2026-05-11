@@ -44,8 +44,9 @@ namespace CrediFlow.API.Controllers
         [HttpPost]
         public async Task<ActionResult<ResultAPI>> Search([FromBody] SearchLoanContractRequest request)
         {
-            // Chỉ Admin mới được lọc theo danh sách cửa hàng tuỳ chọn
-            List<Guid>? filterStoreIds = (_userInfoService.IsAdmin && request.FilterStoreIds != null && request.FilterStoreIds.Any())
+            // FilterStoreIds dùng cho UI lọc thêm trong phạm vi được phân quyền.
+            // Service layer vẫn áp dụng GetStoreScopeIds() làm filter bảo mật chính.
+            List<Guid>? filterStoreIds = (request.FilterStoreIds != null && request.FilterStoreIds.Any())
                 ? request.FilterStoreIds
                 : null;
 
@@ -71,10 +72,15 @@ namespace CrediFlow.API.Controllers
             if (!ModelState.IsValid)
                 return Ok(ResultAPI.Error(ModelState, "Dữ liệu không hợp lệ.", 400));
 
-            // StoreManager chỉ được tạo hợp đồng thuộc chi nhánh mình
-            if ((_userInfoService.IsStoreManager || _userInfoService.IsRegionalManager) && !_userInfoService.IsAdmin)
+            // Không cho phép tạo hợp đồng với ngày lập hồ sơ trong tương lai
+            if (model.ApplicationDate > DateOnly.FromDateTime(DateTime.Today))
+                return Ok(ResultAPI.Error(null, "Ngày lập hồ sơ không được lớn hơn ngày hiện tại.", 400));
+
+            // Kiểm tra phạm vi chi nhánh cho tất cả role (trừ Admin)
+            if (!_userInfoService.IsAdmin)
             {
-                if (!_userInfoService.GetStoreScopeIds(model.StoreId).Any())
+                var scopeIds = _userInfoService.GetStoreScopeIds(model.StoreId);
+                if (scopeIds != null && !scopeIds.Any())
                     return Ok(ResultAPI.Error(null, "Bạn không có quyền tạo hợp đồng cho chi nhánh khác."));
             }
 
@@ -84,8 +90,9 @@ namespace CrediFlow.API.Controllers
                 var rs = await _loanContractService.Save(model);
                 return Ok(ResultAPI.Success(rs, $"{(isUpdate ? "Cập nhật" : "Thêm mới")} hợp đồng thành công."));
             }
-            catch (KeyNotFoundException ex)      { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
-            catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (KeyNotFoundException ex)         { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
+            catch (InvalidOperationException ex)    { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (UnauthorizedAccessException ex)  { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
         }
 
         // POST api/LoanContract/Calculate
@@ -210,6 +217,30 @@ namespace CrediFlow.API.Controllers
             {
                 return Ok(ResultAPI.Error(null, ex.Message, 403));
             }
+        }
+
+        // POST api/LoanContract/GetAuditLogs
+        /// <summary>Lấy lịch sử thao tác hợp đồng (chỉ dành cho Admin).</summary>
+        [HttpPost]
+        public async Task<ActionResult<ResultAPI>> GetAuditLogs([FromBody] Guid loanContractId)
+        {
+            if (!_userInfoService.IsAdmin)
+                return Ok(ResultAPI.ResultWithAccessDenined());
+
+            var rs = await _loanContractService.GetAuditLogs(loanContractId);
+            return Ok(ResultAPI.Success(rs));
+        }
+
+        // POST api/LoanContract/RecalculateAllSchedules
+        /// <summary>Tính toán lại lịch trả nợ cho tất cả HĐ trả góp chưa có thanh toán (Admin only).</summary>
+        [HttpPost]
+        public async Task<ActionResult<ResultAPI>> RecalculateAllSchedules()
+        {
+            if (!_userInfoService.IsAdmin)
+                return Ok(ResultAPI.ResultWithAccessDenined());
+
+            var count = await _loanContractService.RecalculateAllPendingSchedulesAsync();
+            return Ok(ResultAPI.Success(new { UpdatedCount = count }, $"Đã tính toán lại lịch trả nợ cho {count} hợp đồng."));
         }
     }
 

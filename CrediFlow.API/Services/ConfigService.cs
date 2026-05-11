@@ -1,4 +1,4 @@
-﻿using CrediFlow.API.Interceptors;
+using CrediFlow.API.Interceptors;
 using CrediFlow.API.Models;
 using CrediFlow.API.Services;
 using CrediFlow.DataContext.Models;
@@ -12,10 +12,15 @@ namespace CrediFlow.API.Services
         {
             // AuditInterceptor đăng ký singleton – IHttpContextAccessor là singleton an toàn
             services.AddSingleton<AuditInterceptor>();
-
             services.AddDbContext<CrediflowContext>((sp, options) =>
             {
-                options.UseNpgsql(Config.ConnectionStrings.CrediFlowConnection);
+                options.UseNpgsql(Config.ConnectionStrings.CrediFlowConnection, npgsqlOptions =>
+                {
+                    npgsqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(10),
+                        errorCodesToAdd: null);
+                });
                 options.AddInterceptors(sp.GetRequiredService<AuditInterceptor>());
             });
 
