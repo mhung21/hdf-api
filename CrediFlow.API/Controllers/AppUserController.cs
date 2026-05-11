@@ -103,6 +103,10 @@ namespace CrediFlow.API.Controllers
             {
                 return Ok(ResultAPI.Error(null, ex.Message, 400));
             }
+            catch (InvalidOperationException ex)
+            {
+                return Ok(ResultAPI.Error(null, ex.Message, 400));
+            }
         }
     }
 
