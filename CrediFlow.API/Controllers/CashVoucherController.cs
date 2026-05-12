@@ -117,6 +117,11 @@ namespace CrediFlow.API.Controllers
             }
             catch (KeyNotFoundException ex)      { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
             catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (Exception ex)
+            {
+                var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                return Ok(ResultAPI.Error(null, $"Lỗi khi tạo phiếu thu: {innerMsg}"));
+            }
         }
     }
 

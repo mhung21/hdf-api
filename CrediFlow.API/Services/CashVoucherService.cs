@@ -227,22 +227,24 @@ namespace CrediFlow.API.Services
             // 3. Thu các khoản theo thứ tự ưu tiên, lan sang các kỳ sau nếu còn dư.
             if (unpaidSchedules.Count > 0)
             {
-                (string component, Func<LoanRepaymentSchedule, decimal> due, Action<LoanRepaymentSchedule, decimal> apply)[] steps =
+                // allocComponent = giá trị ghi vào CashVoucherAllocation.ComponentCode (phải khớp DB check constraint)
+                // scheduleComponent = mã nội bộ dùng trong Purposes để cho phép/bỏ qua bước
+                (string allocComponent, string scheduleComponent, Func<LoanRepaymentSchedule, decimal> due, Action<LoanRepaymentSchedule, decimal> apply)[] steps =
                 [
-                    ("INTEREST",     s => s.DueInterestAmount     - s.PaidInterestAmount,     (s, v) => s.PaidInterestAmount     += v),
-                    ("QLKV_FEE",     s => s.DueQlkvAmount         - s.PaidQlkvAmount,         (s, v) => { s.PaidQlkvAmount += v; s.PaidPeriodicFeeAmount += v; }),
-                    ("QLTS_FEE",     s => s.DueQltsAmount         - s.PaidQltsAmount,         (s, v) => { s.PaidQltsAmount += v; s.PaidPeriodicFeeAmount += v; }),
-                    ("LATE_PENALTY", s => s.DueLatePenaltyAmount  - s.PaidLatePenaltyAmount,  (s, v) => s.PaidLatePenaltyAmount  += v),
-                    ("PRINCIPAL",    s => s.DuePrincipalAmount     - s.PaidPrincipalAmount,    (s, v) => s.PaidPrincipalAmount    += v),
+                    (VoucherComponentCode.Interest,    "INTEREST",     s => s.DueInterestAmount     - s.PaidInterestAmount,     (s, v) => s.PaidInterestAmount     += v),
+                    (VoucherComponentCode.PeriodicFee, "QLKV_FEE",    s => s.DueQlkvAmount         - s.PaidQlkvAmount,         (s, v) => { s.PaidQlkvAmount += v; s.PaidPeriodicFeeAmount += v; }),
+                    (VoucherComponentCode.PeriodicFee, "QLTS_FEE",    s => s.DueQltsAmount         - s.PaidQltsAmount,         (s, v) => { s.PaidQltsAmount += v; s.PaidPeriodicFeeAmount += v; }),
+                    (VoucherComponentCode.LatePenalty,  "LATE_PENALTY", s => s.DueLatePenaltyAmount  - s.PaidLatePenaltyAmount,  (s, v) => s.PaidLatePenaltyAmount  += v),
+                    (VoucherComponentCode.Principal,   "PRINCIPAL",    s => s.DuePrincipalAmount     - s.PaidPrincipalAmount,    (s, v) => s.PaidPrincipalAmount    += v),
                 ];
 
                 foreach (var schedule in unpaidSchedules)
                 {
                     if (remaining <= 0) break;
 
-                    foreach (var (component, dueFunc, applyFunc) in steps)
+                    foreach (var (allocComponent, scheduleComponent, dueFunc, applyFunc) in steps)
                     {
-                        if (!purposes.Contains(component) || remaining <= 0) continue;
+                        if (!purposes.Contains(scheduleComponent) || remaining <= 0) continue;
                         decimal due = Math.Max(0, dueFunc(schedule));
                         decimal take = Math.Min(remaining, due);
                         if (take <= 0) continue;
@@ -254,7 +256,7 @@ namespace CrediFlow.API.Services
                             AllocationId = Guid.CreateVersion7(),
                             LoanContractId = model.LoanContractId,
                             ScheduleId = schedule.ScheduleId,
-                            ComponentCode = component,
+                            ComponentCode = allocComponent,
                             Amount = take,
                         });
                     }

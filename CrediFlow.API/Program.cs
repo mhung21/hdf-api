@@ -218,6 +218,11 @@ app.UseExceptionHandler(a => a.Run(async context =>
     var ex = exceptionHandlerPathFeature.Error;
 
     Log.Error(ex, "Unhandled exception at {Path}", exceptionHandlerPathFeature.Path);
+
+    context.Response.StatusCode = 500;
+    context.Response.ContentType = "application/json";
+    var result = CrediFlow.Common.Models.ResultAPI.Error(null, "Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.");
+    await context.Response.WriteAsJsonAsync(result);
 }));
 
 // Disabled: Nginx xử lý SSL/TLS (reverse proxy), app chỉ nhận HTTP từ proxy.

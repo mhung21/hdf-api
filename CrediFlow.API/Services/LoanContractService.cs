@@ -7,6 +7,8 @@ using CrediFlow.DataContext.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace CrediFlow.API.Services
 {
@@ -393,6 +395,26 @@ namespace CrediFlow.API.Services
             obj.StatusCode = isBackdatedDisburse
                 ? LoanContractStatus.PendingDisbursement
                 : (model.InitialStatus ?? obj.StatusCode);
+            // ── Ghi audit log tạo/cập nhật hợp đồng vào contract_audit_logs ──
+            DbContext.ContractAuditLogs.Add(new ContractAuditLog
+            {
+                AuditLogId = Guid.CreateVersion7(),
+                LoanContractId = obj.LoanContractId,
+                ActionCode = isCreate ? "INSERT" : "UPDATE",
+                OldData = null,
+                NewData = JsonSerializer.Serialize(new
+                {
+                    obj.ContractNo,
+                    obj.StatusCode,
+                    obj.PrincipalAmount,
+                    obj.TermMonths,
+                    obj.StoreId,
+                    obj.CustomerId,
+                }),
+                ChangedBy = CommonLib.GetGUID(User.UserId),
+                ChangedAt = DateTime.Now,
+                Note = isCreate ? "Tạo hợp đồng mới" : "Cập nhật hợp đồng",
+            });
 
             await DbContext.SaveChangesAsync();
 
@@ -1021,6 +1043,19 @@ namespace CrediFlow.API.Services
                 Reason = reason,
             });
 
+            // ── Ghi audit log chuyển trạng thái vào contract_audit_logs ───────
+            DbContext.ContractAuditLogs.Add(new ContractAuditLog
+            {
+                AuditLogId = Guid.CreateVersion7(),
+                LoanContractId = loanContractId,
+                ActionCode = "STATUS_CHANGE",
+                OldData = JsonSerializer.Serialize(new { StatusCode = fromStatus }),
+                NewData = JsonSerializer.Serialize(new { StatusCode = toStatus }),
+                ChangedBy = userId,
+                ChangedAt = now,
+                Note = reason,
+            });
+
             await DbContext.SaveChangesAsync();
             return obj;
         }
@@ -1139,10 +1174,10 @@ namespace CrediFlow.API.Services
 
         public async Task<IList<AuditLogDto>> GetAuditLogs(Guid loanContractId)
         {
-            return await DbContext.ContractAuditLogs
+            // ── Nguồn 1: contract_audit_logs – ghi trực tiếp trong nghiệp vụ ──
+            var contractLogs = await DbContext.ContractAuditLogs
                 .Include(a => a.ChangedByNavigation)
                 .Where(a => a.LoanContractId == loanContractId)
-                .OrderByDescending(a => a.ChangedAt)
                 .Select(a => new AuditLogDto
                 {
                     AuditLogId = a.AuditLogId,
@@ -1155,12 +1190,43 @@ namespace CrediFlow.API.Services
                     ChangedByName = a.ChangedByNavigation != null ? (a.ChangedByNavigation.FullName ?? a.ChangedByNavigation.Username) : null
                 })
                 .ToListAsync();
+
+            // ── Nguồn 2: audit_logs – AuditInterceptor ghi tự động ────────────
+            var genericLogs = await DbContext.AuditLogs
+                .Include(a => a.ChangedByNavigation)
+                .Where(a => a.LoanContractId == loanContractId)
+                .Select(a => new AuditLogDto
+                {
+                    AuditLogId = a.AuditLogId,
+                    TableName = a.TableName,
+                    ActionCode = a.ActionCode,
+                    OldData = a.OldData,
+                    NewData = a.NewData,
+                    ChangedAt = a.ChangedAt,
+                    ChangedBy = a.ChangedBy,
+                    ChangedByName = a.ChangedByNavigation != null ? (a.ChangedByNavigation.FullName ?? a.ChangedByNavigation.Username) : null
+                })
+                .ToListAsync();
+
+            // Gộp, loại trùng theo AuditLogId, sắp xếp mới nhất lên đầu
+            return contractLogs
+                .Concat(genericLogs)
+                .GroupBy(a => a.AuditLogId)
+                .Select(g => g.First())
+                .OrderByDescending(a => a.ChangedAt)
+                .ToList();
         }
 
         public async Task<int> RecalculateAllPendingSchedulesAsync()
         {
+            // Lọc tất cả HĐ trả góp mà chưa có kỳ nào được thanh toán.
+            // Include thêm CashVoucherAllocations & LoanCharges để xóa bản ghi con trước khi xóa schedule
+            // (các FK dùng Restrict → phải xóa con trước cha).
             var eligibleContracts = await DbContext.LoanContracts
                 .Include(c => c.LoanRepaymentSchedules)
+                    .ThenInclude(s => s.CashVoucherAllocations)
+                .Include(c => c.LoanRepaymentSchedules)
+                    .ThenInclude(s => s.LoanCharges)
                 .Where(c => c.ContractType == LoanContractType.Installment
                          && c.LoanRepaymentSchedules.Any()
                          && !c.LoanRepaymentSchedules.Any(s => s.StatusCode == ScheduleStatus.Paid || s.PaidPrincipalAmount > 0))
@@ -1196,7 +1262,16 @@ namespace CrediFlow.API.Services
 
                     if (calc.Schedule.Count == 0) continue;
 
-                    // Xoa lich cu va add lich moi
+                    // Xóa bản ghi con trước (FK Restrict) → rồi mới xóa schedule
+                    var allAllocations = contract.LoanRepaymentSchedules
+                        .SelectMany(s => s.CashVoucherAllocations).ToList();
+                    var allCharges = contract.LoanRepaymentSchedules
+                        .SelectMany(s => s.LoanCharges).ToList();
+
+                    if (allAllocations.Count > 0)
+                        DbContext.CashVoucherAllocations.RemoveRange(allAllocations);
+                    if (allCharges.Count > 0)
+                        DbContext.LoanCharges.RemoveRange(allCharges);
 
                     DbContext.LoanRepaymentSchedules.RemoveRange(contract.LoanRepaymentSchedules);
 
@@ -1222,17 +1297,24 @@ namespace CrediFlow.API.Services
                             StatusCode             = ScheduleStatus.Pending
                         });
                     }
+
+                    // Lưu từng hợp đồng riêng để cách ly lỗi — nếu 1 HĐ lỗi thì không ảnh hưởng HĐ khác
+                    await DbContext.SaveChangesAsync();
                     updatedCount++;
                 }
                 catch (Exception ex)
                 {
-                    errors.Add($"{contract.ContractNo}: {ex.Message}");
-                }
-            }
+                    // Lấy inner exception để debug — EF thường wrap lỗi DB thật bên trong
+                    var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                    errors.Add($"{contract.ContractNo}: {innerMsg}");
 
-            if (updatedCount > 0)
-            {
-                await DbContext.SaveChangesAsync();
+                    // Detach các entity bị lỗi để không ảnh hưởng các lần SaveChanges tiếp theo
+                    foreach (var entry in DbContext.ChangeTracker.Entries()
+                        .Where(e => e.State == EntityState.Added || e.State == EntityState.Deleted || e.State == EntityState.Modified))
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
             }
 
             if (errors.Count > 0)
@@ -1575,6 +1657,19 @@ namespace CrediFlow.API.Services
             if (targetUser.StoreId.HasValue)
                 obj.StoreId = targetUser.StoreId.Value;
             obj.UpdatedAt = DateTime.Now;
+
+            // Ghi audit log chuyển giao
+            DbContext.ContractAuditLogs.Add(new ContractAuditLog
+            {
+                AuditLogId = Guid.CreateVersion7(),
+                LoanContractId = loanContractId,
+                ActionCode = "ASSIGN",
+                OldData = JsonSerializer.Serialize(new { AssignedToUserId = oldAssignedUserId, StoreId = oldStoreId, StoreName = oldStoreName }),
+                NewData = JsonSerializer.Serialize(new { AssignedToUserId = targetUserId, StoreId = targetUser.StoreId, StoreName = targetUser.Store?.StoreName }),
+                ChangedBy = CommonLib.GetGUID(User.UserId),
+                ChangedAt = DateTime.Now,
+                Note = $"Chuyển giao cho {targetUser.FullName ?? targetUser.Username}",
+            });
 
             await DbContext.SaveChangesAsync();
             return obj;

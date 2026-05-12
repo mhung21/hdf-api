@@ -250,7 +250,8 @@ namespace CrediFlow.API.Controllers
             }
             catch (Exception ex)
             {
-                return Ok(ResultAPI.Error(null, $"Lỗi: {ex.Message}", 500));
+                var msg = ex.InnerException?.Message ?? ex.Message;
+                return Ok(ResultAPI.Error(null, $"Lỗi: {msg}", 500));
             }
         }
     }
