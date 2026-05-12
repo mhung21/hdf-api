@@ -97,6 +97,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddStartupServices(builder.Configuration);
 builder.Services.AddCustomService(builder.Configuration);
+builder.Services.AddSingleton<TelegramAlertService>();
 
 
 
@@ -223,6 +224,29 @@ app.UseExceptionHandler(a => a.Run(async context =>
     context.Response.ContentType = "application/json";
     var result = CrediFlow.Common.Models.ResultAPI.Error(null, "Đã xảy ra lỗi hệ thống. Vui lòng thử lại sau.");
     await context.Response.WriteAsJsonAsync(result);
+
+    // ── Telegram Alert ──
+    try
+    {
+        var telegram = context.RequestServices.GetService<TelegramAlertService>();
+        if (telegram?.IsEnabled == true)
+        {
+            var req = context.Request;
+            var curlCmd = context.Items.TryGetValue("RequestBody", out var bodyObj) && bodyObj is string bodyStr
+                ? $"curl -X {req.Method} '{req.Scheme}://{req.Host}{req.Path}{req.QueryString}' -H 'Content-Type: {req.ContentType}' -d '{bodyStr}'"
+                : $"curl -X {req.Method} '{req.Scheme}://{req.Host}{req.Path}{req.QueryString}'";
+
+            _ = telegram.SendErrorAlertAsync(
+                httpMethod: req.Method,
+                requestPath: req.Path.ToString(),
+                statusCode: 500,
+                errorMessage: ex?.Message + (ex?.InnerException != null ? $"\n→ {ex.InnerException.Message}" : ""),
+                curlCommand: curlCmd,
+                responseBody: System.Text.Json.JsonSerializer.Serialize(result),
+                clientIp: context.Connection.RemoteIpAddress?.ToString());
+        }
+    }
+    catch { /* Alert failure must not affect API response */ }
 }));
 
 // Disabled: Nginx xử lý SSL/TLS (reverse proxy), app chỉ nhận HTTP từ proxy.

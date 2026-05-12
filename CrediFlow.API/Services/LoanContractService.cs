@@ -445,7 +445,7 @@ namespace CrediFlow.API.Services
             var prefix = $"{year2}{storeToken}-HD-";
 
             var usedCodes = await DbContext.LoanContracts
-                .Where(c => c.StoreId == storeId && c.ContractNo.StartsWith(prefix))
+                .Where(c => c.ContractNo.StartsWith(prefix))
                 .Select(c => c.ContractNo)
                 .ToListAsync();
 
@@ -974,7 +974,7 @@ namespace CrediFlow.API.Services
                                 InstallmentAmount      = row.Installment,
                                 DuePrincipalAmount     = row.DuePrincipal,
                                 DueInterestAmount      = row.DueInterest,
-                                DueQlkvAmount          = row.DueQlkv,
+                                DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee,
                                 DueQltsAmount          = row.DueQlts,
                                 DuePeriodicFeeAmount   = row.DuePeriodicFee,
                                 DueLatePenaltyAmount   = 0,
@@ -1187,7 +1187,8 @@ namespace CrediFlow.API.Services
                     NewData = a.NewData,
                     ChangedAt = a.ChangedAt,
                     ChangedBy = a.ChangedBy,
-                    ChangedByName = a.ChangedByNavigation != null ? (a.ChangedByNavigation.FullName ?? a.ChangedByNavigation.Username) : null
+                    ChangedByName = a.ChangedByNavigation != null ? (a.ChangedByNavigation.FullName ?? a.ChangedByNavigation.Username) : null,
+                    Note = a.Note,
                 })
                 .ToListAsync();
 
@@ -1220,13 +1221,8 @@ namespace CrediFlow.API.Services
         public async Task<int> RecalculateAllPendingSchedulesAsync()
         {
             // Lọc tất cả HĐ trả góp mà chưa có kỳ nào được thanh toán.
-            // Include thêm CashVoucherAllocations & LoanCharges để xóa bản ghi con trước khi xóa schedule
-            // (các FK dùng Restrict → phải xóa con trước cha).
             var eligibleContracts = await DbContext.LoanContracts
                 .Include(c => c.LoanRepaymentSchedules)
-                    .ThenInclude(s => s.CashVoucherAllocations)
-                .Include(c => c.LoanRepaymentSchedules)
-                    .ThenInclude(s => s.LoanCharges)
                 .Where(c => c.ContractType == LoanContractType.Installment
                          && c.LoanRepaymentSchedules.Any()
                          && !c.LoanRepaymentSchedules.Any(s => s.StatusCode == ScheduleStatus.Paid || s.PaidPrincipalAmount > 0))
@@ -1234,6 +1230,7 @@ namespace CrediFlow.API.Services
 
             int updatedCount = 0;
             var errors = new List<string>();
+            var now = DateTime.Now;
 
             foreach (var contract in eligibleContracts)
             {
@@ -1262,40 +1259,75 @@ namespace CrediFlow.API.Services
 
                     if (calc.Schedule.Count == 0) continue;
 
-                    // Xóa bản ghi con trước (FK Restrict) → rồi mới xóa schedule
-                    var allAllocations = contract.LoanRepaymentSchedules
-                        .SelectMany(s => s.CashVoucherAllocations).ToList();
-                    var allCharges = contract.LoanRepaymentSchedules
-                        .SelectMany(s => s.LoanCharges).ToList();
+                    // ── UPDATE in-place: không DELETE để tránh trigger chặn ──────
+                    var existingSchedules = contract.LoanRepaymentSchedules
+                        .OrderBy(s => s.PeriodNo)
+                        .ToList();
 
-                    if (allAllocations.Count > 0)
-                        DbContext.CashVoucherAllocations.RemoveRange(allAllocations);
-                    if (allCharges.Count > 0)
-                        DbContext.LoanCharges.RemoveRange(allCharges);
-
-                    DbContext.LoanRepaymentSchedules.RemoveRange(contract.LoanRepaymentSchedules);
+                    // Map theo PeriodNo: cập nhật row hiện có, thêm mới nếu thiếu
+                    var existingByPeriod = existingSchedules.ToDictionary(s => s.PeriodNo);
 
                     foreach (var row in calc.Schedule)
                     {
-                        DbContext.LoanRepaymentSchedules.Add(new LoanRepaymentSchedule
+                        if (existingByPeriod.TryGetValue(row.PeriodNo, out var existing))
                         {
-                            ScheduleId             = Guid.CreateVersion7(),
-                            LoanContractId         = contract.LoanContractId,
-                            PeriodNo               = row.PeriodNo,
-                            PeriodFromDate         = row.FromDate ?? DateOnly.MinValue,
-                            PeriodToDate           = row.ToDate ?? DateOnly.MinValue,
-                            DueDate                = row.ToDate ?? DateOnly.MinValue,
-                            ActualDayCount         = row.DayCount,
-                            OpeningPrincipalAmount = row.OpeningPrincipal,
-                            InstallmentAmount      = row.Installment,
-                            DuePrincipalAmount     = row.DuePrincipal,
-                            DueInterestAmount      = row.DueInterest,
-                            DueQlkvAmount          = row.DueQlkv,
-                            DueQltsAmount          = row.DueQlts,
-                            DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee,
-                            ClosingPrincipalAmount = row.ClosingPrincipal,
-                            StatusCode             = ScheduleStatus.Pending
-                        });
+                            // Cập nhật row hiện có
+                            existing.PeriodFromDate         = row.FromDate ?? DateOnly.MinValue;
+                            existing.PeriodToDate           = row.ToDate ?? DateOnly.MinValue;
+                            existing.DueDate                = row.ToDate ?? DateOnly.MinValue;
+                            existing.ActualDayCount         = row.DayCount;
+                            existing.OpeningPrincipalAmount = row.OpeningPrincipal;
+                            existing.InstallmentAmount      = row.Installment;
+                            existing.DuePrincipalAmount     = row.DuePrincipal;
+                            existing.DueInterestAmount      = row.DueInterest;
+                            existing.DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee;
+                            existing.DueQltsAmount          = row.DueQlts;
+                            existing.DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee;
+                            existing.ClosingPrincipalAmount = row.ClosingPrincipal;
+                            existing.StatusCode             = ScheduleStatus.Pending;
+                            existing.UpdatedAt              = now;
+                        }
+                        else
+                        {
+                            // Thêm kỳ mới (trường hợp số kỳ tăng)
+                            DbContext.LoanRepaymentSchedules.Add(new LoanRepaymentSchedule
+                            {
+                                ScheduleId             = Guid.CreateVersion7(),
+                                LoanContractId         = contract.LoanContractId,
+                                PeriodNo               = row.PeriodNo,
+                                PeriodFromDate         = row.FromDate ?? DateOnly.MinValue,
+                                PeriodToDate           = row.ToDate ?? DateOnly.MinValue,
+                                DueDate                = row.ToDate ?? DateOnly.MinValue,
+                                ActualDayCount         = row.DayCount,
+                                OpeningPrincipalAmount = row.OpeningPrincipal,
+                                InstallmentAmount      = row.Installment,
+                                DuePrincipalAmount     = row.DuePrincipal,
+                                DueInterestAmount      = row.DueInterest,
+                                DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee,
+                                DueQltsAmount          = row.DueQlts,
+                                DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee,
+                                ClosingPrincipalAmount = row.ClosingPrincipal,
+                                StatusCode             = ScheduleStatus.Pending,
+                                CreatedAt              = now,
+                                UpdatedAt              = now,
+                            });
+                        }
+                    }
+
+                    // Đánh dấu các kỳ dư thừa (nếu cũ có nhiều kỳ hơn mới) → zero-out + CANCELLED
+                    var newPeriodNos = calc.Schedule.Select(r => r.PeriodNo).ToHashSet();
+                    foreach (var surplus in existingSchedules.Where(s => !newPeriodNos.Contains(s.PeriodNo)))
+                    {
+                        surplus.OpeningPrincipalAmount = 0;
+                        surplus.InstallmentAmount      = 0;
+                        surplus.DuePrincipalAmount     = 0;
+                        surplus.DueInterestAmount      = 0;
+                        surplus.DueQlkvAmount          = 0;
+                        surplus.DueQltsAmount          = 0;
+                        surplus.DuePeriodicFeeAmount   = 0;
+                        surplus.ClosingPrincipalAmount  = 0;
+                        surplus.StatusCode             = "CANCELLED";
+                        surplus.UpdatedAt              = now;
                     }
 
                     // Lưu từng hợp đồng riêng để cách ly lỗi — nếu 1 HĐ lỗi thì không ảnh hưởng HĐ khác
@@ -1473,7 +1505,7 @@ namespace CrediFlow.API.Services
 
                     row.OpeningPrincipalAmount = balance;
                     row.DueInterestAmount = interest;
-                    row.DueQlkvAmount = qlkv;
+                    row.DueQlkvAmount = qlkv + fixedFee;
                     row.DueQltsAmount = qlts;
                     row.DuePeriodicFeeAmount = qlkv + qlts + fixedFee;
                     row.DuePrincipalAmount = principal;

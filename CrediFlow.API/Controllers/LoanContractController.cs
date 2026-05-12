@@ -13,12 +13,12 @@ namespace CrediFlow.API.Controllers
     public class LoanContractController : ControllerBase
     {
         private readonly ILoanContractService _loanContractService;
-        private readonly IUserInfoService     _userInfoService;
+        private readonly IUserInfoService _userInfoService;
 
         public LoanContractController(ILoanContractService loanContractService, IUserInfoService userInfoService)
         {
             _loanContractService = loanContractService;
-            _userInfoService     = userInfoService;
+            _userInfoService = userInfoService;
         }
 
         // GET api/LoanContract/GetAll
@@ -51,7 +51,7 @@ namespace CrediFlow.API.Controllers
                 : null;
 
             var rs = await _loanContractService.SearchLoanContract(
-                request.Keyword      ?? string.Empty,
+                request.Keyword ?? string.Empty,
                 request.PageIndex,
                 request.PageSize,
                 request.SortBy,
@@ -90,9 +90,9 @@ namespace CrediFlow.API.Controllers
                 var rs = await _loanContractService.Save(model);
                 return Ok(ResultAPI.Success(rs, $"{(isUpdate ? "Cập nhật" : "Thêm mới")} hợp đồng thành công."));
             }
-            catch (KeyNotFoundException ex)         { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
-            catch (InvalidOperationException ex)    { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
-            catch (UnauthorizedAccessException ex)  { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
+            catch (KeyNotFoundException ex) { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
+            catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (UnauthorizedAccessException ex) { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
         }
 
         // POST api/LoanContract/Calculate
@@ -122,9 +122,9 @@ namespace CrediFlow.API.Controllers
                 var rs = await _loanContractService.Cancel(request.LoanContractId, request.CancellationReason);
                 return Ok(ResultAPI.Success(rs, $"Đã hủy hợp đồng {rs.ContractNo} thành công."));
             }
-            catch (KeyNotFoundException ex)        { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
-            catch (UnauthorizedAccessException ex)   { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
-            catch (InvalidOperationException ex)     { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (KeyNotFoundException ex) { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
+            catch (UnauthorizedAccessException ex) { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
+            catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
         }
 
         // POST api/LoanContract/GetRepaymentSchedule
@@ -157,21 +157,21 @@ namespace CrediFlow.API.Controllers
                     request.LoanContractId, request.ToStatus, request.Reason);
                 var label = request.ToStatus switch
                 {
-                    "PENDING_APPROVAL"      => "Chờ duyệt",
-                    "PENDING_DISBURSEMENT"  => "Chờ giải ngân",
-                    "DISBURSED"             => "Đang thu",
-                    "BAD_DEBT"              => "Nợ xấu",
-                    "SETTLED"               => "Đã tất toán",
-                    "CLOSED"                => "Đã đóng",
-                    "BAD_DEBT_CLOSED"       => "Đã đóng (nợ xấu)",
-                    "CANCELLED"             => "Đã hủy",
-                    "DRAFT"                 => "Nháp",
-                    _                       => request.ToStatus,
+                    "PENDING_APPROVAL" => "Chờ duyệt",
+                    "PENDING_DISBURSEMENT" => "Chờ giải ngân",
+                    "DISBURSED" => "Đang thu",
+                    "BAD_DEBT" => "Nợ xấu",
+                    "SETTLED" => "Đã tất toán",
+                    "CLOSED" => "Đã đóng",
+                    "BAD_DEBT_CLOSED" => "Đã đóng (nợ xấu)",
+                    "CANCELLED" => "Đã hủy",
+                    "DRAFT" => "Nháp",
+                    _ => request.ToStatus,
                 };
                 return Ok(ResultAPI.Success(rs, $"Đã chuyển hợp đồng sang trạng thái '{label}' thành công."));
             }
-            catch (KeyNotFoundException ex)        { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
-            catch (InvalidOperationException ex)   { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
+            catch (KeyNotFoundException ex) { return Ok(ResultAPI.Error(null, ex.Message, 404)); }
+            catch (InvalidOperationException ex) { return Ok(ResultAPI.Error(null, ex.Message, 400)); }
             catch (UnauthorizedAccessException ex) { return Ok(ResultAPI.Error(null, ex.Message, 403)); }
         }
 
@@ -258,7 +258,7 @@ namespace CrediFlow.API.Controllers
 
     public class CancelLoanContractRequest
     {
-        public Guid   LoanContractId     { get; set; }
+        public Guid LoanContractId { get; set; }
         public string CancellationReason { get; set; } = string.Empty;
     }
 
@@ -270,39 +270,39 @@ namespace CrediFlow.API.Controllers
 
     public class SearchLoanContractRequest
     {
-        public string? Keyword   { get; set; }
-        public int     PageIndex { get; set; } = 1;
-        public int     PageSize  { get; set; } = 1000;
+        public string? Keyword { get; set; }
+        public int PageIndex { get; set; } = 1;
+        public int PageSize { get; set; } = 1000;
         /// <summary>ContractNo | ApplicationDate | StatusCode | PrincipalAmount | CreatedAt</summary>
-        public string? SortBy          { get; set; } = "CreatedAt";
-        public bool    SortDesc        { get; set; } = true;
+        public string? SortBy { get; set; } = "CreatedAt";
+        public bool SortDesc { get; set; } = true;
         // ── Bộ lọc bổ sung ──
         /// <summary>Lọc theo trạng thái hợp đồng (VD: DRAFT, DISBURSED...)</summary>
-        public string?   StatusCode     { get; set; }
+        public string? StatusCode { get; set; }
         /// <summary>Ngày bắt đầu khoảng lọc</summary>
-        public DateOnly? FromDate       { get; set; }
+        public DateOnly? FromDate { get; set; }
         /// <summary>Ngày kết thúc khoảng lọc</summary>
-        public DateOnly? ToDate         { get; set; }
+        public DateOnly? ToDate { get; set; }
         /// <summary>Loại ngày lọc: ApplicationDate | DisbursedDate</summary>
-        public string?   DateFilterType { get; set; }
+        public string? DateFilterType { get; set; }
         /// <summary>Lọc theo danh sách cửa hàng — chỉ Admin mới dùng được</summary>
         public List<Guid>? FilterStoreIds { get; set; }
     }
 
     public class ChangeStatusRequest
     {
-        public Guid   LoanContractId { get; set; }
+        public Guid LoanContractId { get; set; }
         /// <summary>Trạng thái đích. Xem LoanContractStatus để biết các giá trị hợp lệ.</summary>
-        public string ToStatus       { get; set; } = string.Empty;
+        public string ToStatus { get; set; } = string.Empty;
         /// <summary>Lý do chuyển trạng thái (bắt buộc khi hủy hoặc từ chối).</summary>
-        public string? Reason        { get; set; }
+        public string? Reason { get; set; }
     }
 
     public class AssignLoanContractRequest
     {
         public Guid LoanContractId { get; set; }
         /// <summary>Id của nhân viên sẽ tiếp nhận quản lý hợp đồng.</summary>
-        public Guid TargetUserId   { get; set; }
+        public Guid TargetUserId { get; set; }
     }
 }
 

@@ -10,5 +10,6 @@ namespace CrediFlow.API.Models
         public DateTime ChangedAt { get; set; }
         public Guid? ChangedBy { get; set; }
         public string? ChangedByName { get; set; }
+        public string? Note { get; set; }
     }
 }
