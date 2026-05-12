@@ -239,8 +239,19 @@ namespace CrediFlow.API.Controllers
             if (!_userInfoService.IsAdmin)
                 return Ok(ResultAPI.ResultWithAccessDenined());
 
-            var count = await _loanContractService.RecalculateAllPendingSchedulesAsync();
-            return Ok(ResultAPI.Success(new { UpdatedCount = count }, $"Đã tính toán lại lịch trả nợ cho {count} hợp đồng."));
+            try
+            {
+                var count = await _loanContractService.RecalculateAllPendingSchedulesAsync();
+                return Ok(ResultAPI.Success(new { UpdatedCount = count }, $"Đã tính toán lại lịch trả nợ cho {count} hợp đồng."));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Ok(ResultAPI.Error(new { Message = ex.Message }, ex.Message, 400));
+            }
+            catch (Exception ex)
+            {
+                return Ok(ResultAPI.Error(null, $"Lỗi: {ex.Message}", 500));
+            }
         }
     }
 
