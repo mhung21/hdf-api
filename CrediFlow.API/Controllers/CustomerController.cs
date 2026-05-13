@@ -1,5 +1,6 @@
 ﻿using CrediFlow.API.Models;
 using CrediFlow.API.Services;
+using CrediFlow.API.Interceptors;
 using CrediFlow.Common.Models;
 using CrediFlow.Common.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +24,7 @@ namespace CrediFlow.API.Controllers
 
         // GET api/Customer/GetAll
         [HttpGet]
+        [ActivityLogRead("CUSTOMER", "CUSTOMER")]
         public async Task<ActionResult<ResultAPI>> GetAll()
         {
             var rs = await _customerService.GetAlls();
@@ -31,6 +33,7 @@ namespace CrediFlow.API.Controllers
 
         // POST api/Customer/GetById
         [HttpPost]
+        [ActivityLogRead("CUSTOMER", "CUSTOMER")]
         public async Task<ActionResult<ResultAPI>> GetById([FromBody] Guid id)
         {
             var rs = await _customerService.GetAsync(id);
@@ -42,6 +45,7 @@ namespace CrediFlow.API.Controllers
 
         // POST api/Customer/Search
         [HttpPost]
+        [ActivityLogRead("CUSTOMER", "CUSTOMER")]
         public async Task<ActionResult<ResultAPI>> Search([FromBody] SearchCustomerRequest request)
         {
             var filterStoreIds = (_userInfoService.IsAdmin && request.FilterStoreIds != null && request.FilterStoreIds.Any())
@@ -63,6 +67,7 @@ namespace CrediFlow.API.Controllers
 
         // POST api/Customer/GetByNationalId
         [HttpPost]
+        [ActivityLogRead("CUSTOMER", "CUSTOMER")]
         public async Task<ActionResult<ResultAPI>> GetByNationalId([FromBody] string nationalId)
         {
             if (string.IsNullOrWhiteSpace(nationalId))

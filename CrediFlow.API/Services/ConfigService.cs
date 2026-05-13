@@ -31,6 +31,7 @@ namespace CrediFlow.API.Services
 
             #region Dependency Injection
             services.AddScoped<IDataAccessLogService,       DataAccessLogService>();
+            services.AddScoped<IActivityLogService,         ActivityLogService>();
             services.AddScoped<ICustomerService,          CustomerService>();
             services.AddScoped<IStoreService,             StoreService>();
             services.AddScoped<IAppUserService,           AppUserService>();

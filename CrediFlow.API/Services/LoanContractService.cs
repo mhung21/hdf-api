@@ -175,8 +175,13 @@ namespace CrediFlow.API.Services
 
     public class LoanContractService : BaseService<LoanContract, CrediflowContext>, ILoanContractService
     {
-        public LoanContractService(CrediflowContext dbContext, ICachingHelper cachingHelper, IUserInfoService user)
-            : base(dbContext, cachingHelper, user) { }
+        private readonly IActivityLogService _activityLogService;
+
+        public LoanContractService(CrediflowContext dbContext, ICachingHelper cachingHelper, IUserInfoService user, IActivityLogService activityLogService)
+            : base(dbContext, cachingHelper, user)
+        {
+            _activityLogService = activityLogService;
+        }
 
         private IReadOnlyList<Guid>? GetStoreScopeIds(Guid? storeId = null) => User.GetStoreScopeIds(storeId);
 
@@ -252,6 +257,7 @@ namespace CrediFlow.API.Services
         {
             bool isCreate = model.LoanContractId == null || model.LoanContractId == Guid.Empty;
             LoanContract obj;
+            object? oldSnapshot = null;
 
             if (isCreate)
             {
@@ -354,6 +360,16 @@ namespace CrediFlow.API.Services
                         throw new UnauthorizedAccessException(
                             "Bạn chỉ có thể chỉnh sửa hợp đồng mà bạn đang phụ trách.");
                 }
+
+                oldSnapshot = new
+                {
+                    obj.ContractNo,
+                    obj.StatusCode,
+                    obj.PrincipalAmount,
+                    obj.TermMonths,
+                    obj.StoreId,
+                    obj.AssignedToUserId,
+                };
             }
 
             if (!User.IsAdmin)
@@ -417,6 +433,30 @@ namespace CrediFlow.API.Services
             });
 
             await DbContext.SaveChangesAsync();
+
+            await _activityLogService.LogAsync(new ActivityLogWriteModel
+            {
+                ModuleCode = "LOAN_CONTRACT",
+                ActionCode = isCreate ? "CREATE" : "UPDATE",
+                EntityType = "LOAN_CONTRACT",
+                EntityId = obj.LoanContractId,
+                CustomerId = obj.CustomerId,
+                LoanContractId = obj.LoanContractId,
+                StoreId = obj.StoreId,
+                Summary = isCreate
+                    ? $"Tao hop dong {obj.ContractNo}"
+                    : $"Cap nhat hop dong {obj.ContractNo}",
+                OldData = oldSnapshot != null ? JsonSerializer.Serialize(oldSnapshot) : null,
+                NewData = JsonSerializer.Serialize(new
+                {
+                    obj.ContractNo,
+                    obj.StatusCode,
+                    obj.PrincipalAmount,
+                    obj.TermMonths,
+                    obj.StoreId,
+                    obj.AssignedToUserId,
+                }),
+            });
 
             // Xử lý giải ngân hậu kỳ: set ngày giải ngân thực tế rồi gọi ChangeStatus
             if (isBackdatedDisburse)
@@ -1057,6 +1097,21 @@ namespace CrediFlow.API.Services
             });
 
             await DbContext.SaveChangesAsync();
+
+            await _activityLogService.LogAsync(new ActivityLogWriteModel
+            {
+                ModuleCode = "LOAN_CONTRACT",
+                ActionCode = "STATUS_CHANGE",
+                EntityType = "LOAN_CONTRACT",
+                EntityId = loanContractId,
+                LoanContractId = loanContractId,
+                CustomerId = obj.CustomerId,
+                StoreId = obj.StoreId,
+                Summary = $"Chuyen trang thai hop dong {obj.ContractNo} tu {fromStatus} sang {toStatus}",
+                OldData = JsonSerializer.Serialize(new { StatusCode = fromStatus }),
+                NewData = JsonSerializer.Serialize(new { StatusCode = toStatus }),
+                Metadata = JsonSerializer.Serialize(new { Reason = reason }),
+            });
             return obj;
         }
 
@@ -1220,133 +1275,163 @@ namespace CrediFlow.API.Services
 
         public async Task<int> RecalculateAllPendingSchedulesAsync()
         {
-            // Lọc tất cả HĐ trả góp mà chưa có kỳ nào được thanh toán.
-            var eligibleContracts = await DbContext.LoanContracts
-                .Include(c => c.LoanRepaymentSchedules)
-                .Where(c => c.ContractType == LoanContractType.Installment
-                         && c.LoanRepaymentSchedules.Any()
-                         && !c.LoanRepaymentSchedules.Any(s => s.StatusCode == ScheduleStatus.Paid || s.PaidPrincipalAmount > 0))
-                .ToListAsync();
-
+            const int batchSize = 100;
             int updatedCount = 0;
             var errors = new List<string>();
-            var now = DateTime.Now;
+            var pageIndex = 0;
 
-            foreach (var contract in eligibleContracts)
+            while (true)
             {
-                try
+                // Lấy danh sách contract id theo lô để tránh load toàn bộ dữ liệu vào memory.
+                var contractIds = await DbContext.LoanContracts
+                    .AsNoTracking()
+                    .Where(c => c.ContractType == LoanContractType.Installment
+                             && c.LoanRepaymentSchedules.Any()
+                             && !c.LoanRepaymentSchedules.Any(s => s.StatusCode == ScheduleStatus.Paid || s.PaidPrincipalAmount > 0))
+                    .OrderBy(c => c.CreatedAt)
+                    .ThenBy(c => c.LoanContractId)
+                    .Select(c => c.LoanContractId)
+                    .Skip(pageIndex * batchSize)
+                    .Take(batchSize)
+                    .ToListAsync();
+
+                if (contractIds.Count == 0)
+                    break;
+
+                var contracts = await DbContext.LoanContracts
+                    .Include(c => c.LoanRepaymentSchedules)
+                    .Where(c => contractIds.Contains(c.LoanContractId))
+                    .ToListAsync();
+
+                var contractMap = contracts.ToDictionary(c => c.LoanContractId);
+
+                foreach (var contractId in contractIds)
                 {
-                    // Bỏ qua hợp đồng có dữ liệu không hợp lệ
-                    if (contract.TermMonths <= 0 || contract.PrincipalAmount <= 0)
-                    {
-                        errors.Add($"{contract.ContractNo}: TermMonths={contract.TermMonths}, PrincipalAmount={contract.PrincipalAmount} – bỏ qua");
+                    if (!contractMap.TryGetValue(contractId, out var contract))
                         continue;
-                    }
-                    var request = new LoanCalculateRequest
+
+                    try
                     {
-                        PrincipalAmount = contract.PrincipalAmount,
-                        ContractType = contract.ContractType,
-                        TermMonths = contract.TermMonths,
-                        InterestRateMonthly = contract.InterestRateMonthlySnapshot,
-                        QlkvRateMonthly = contract.QlkvRateMonthlySnapshot,
-                        QltsRateMonthly = contract.QltsRateMonthlySnapshot,
-                        FixedMonthlyFeeAmount = contract.FixedMonthlyFeeAmountSnapshot,
-                        DisbursementDate = contract.DisbursementDate,
-                        InsuranceAmountSnapshot = contract.InsuranceAmountSnapshot
-                    };
+                        var now = DateTime.Now;
 
-                    var calc = Calculate(request);
-
-                    if (calc.Schedule.Count == 0) continue;
-
-                    // ── UPDATE in-place: không DELETE để tránh trigger chặn ──────
-                    var existingSchedules = contract.LoanRepaymentSchedules
-                        .OrderBy(s => s.PeriodNo)
-                        .ToList();
-
-                    // Map theo PeriodNo: cập nhật row hiện có, thêm mới nếu thiếu
-                    var existingByPeriod = existingSchedules.ToDictionary(s => s.PeriodNo);
-
-                    foreach (var row in calc.Schedule)
-                    {
-                        if (existingByPeriod.TryGetValue(row.PeriodNo, out var existing))
+                        // Bỏ qua hợp đồng có dữ liệu không hợp lệ
+                        if (contract.TermMonths <= 0 || contract.PrincipalAmount <= 0)
                         {
-                            // Cập nhật row hiện có
-                            existing.PeriodFromDate         = row.FromDate ?? DateOnly.MinValue;
-                            existing.PeriodToDate           = row.ToDate ?? DateOnly.MinValue;
-                            existing.DueDate                = row.ToDate ?? DateOnly.MinValue;
-                            existing.ActualDayCount         = row.DayCount;
-                            existing.OpeningPrincipalAmount = row.OpeningPrincipal;
-                            existing.InstallmentAmount      = row.Installment;
-                            existing.DuePrincipalAmount     = row.DuePrincipal;
-                            existing.DueInterestAmount      = row.DueInterest;
-                            existing.DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee;
-                            existing.DueQltsAmount          = row.DueQlts;
-                            existing.DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee;
-                            existing.ClosingPrincipalAmount = row.ClosingPrincipal;
-                            existing.StatusCode             = ScheduleStatus.Pending;
-                            existing.UpdatedAt              = now;
+                            errors.Add($"{contract.ContractNo}: TermMonths={contract.TermMonths}, PrincipalAmount={contract.PrincipalAmount} – bỏ qua");
+                            continue;
                         }
-                        else
+
+                        var request = new LoanCalculateRequest
                         {
-                            // Thêm kỳ mới (trường hợp số kỳ tăng)
-                            DbContext.LoanRepaymentSchedules.Add(new LoanRepaymentSchedule
+                            PrincipalAmount = contract.PrincipalAmount,
+                            ContractType = contract.ContractType,
+                            TermMonths = contract.TermMonths,
+                            InterestRateMonthly = contract.InterestRateMonthlySnapshot,
+                            QlkvRateMonthly = contract.QlkvRateMonthlySnapshot,
+                            QltsRateMonthly = contract.QltsRateMonthlySnapshot,
+                            FixedMonthlyFeeAmount = contract.FixedMonthlyFeeAmountSnapshot,
+                            DisbursementDate = contract.DisbursementDate,
+                            InsuranceAmountSnapshot = contract.InsuranceAmountSnapshot
+                        };
+
+                        var calc = Calculate(request);
+
+                        if (calc.Schedule.Count == 0)
+                            continue;
+
+                        // ── UPDATE in-place: không DELETE để tránh trigger chặn ──────
+                        var existingSchedules = contract.LoanRepaymentSchedules
+                            .OrderBy(s => s.PeriodNo)
+                            .ToList();
+
+                        // Map theo PeriodNo: cập nhật row hiện có, thêm mới nếu thiếu
+                        var existingByPeriod = existingSchedules.ToDictionary(s => s.PeriodNo);
+
+                        foreach (var row in calc.Schedule)
+                        {
+                            if (existingByPeriod.TryGetValue(row.PeriodNo, out var existing))
                             {
-                                ScheduleId             = Guid.CreateVersion7(),
-                                LoanContractId         = contract.LoanContractId,
-                                PeriodNo               = row.PeriodNo,
-                                PeriodFromDate         = row.FromDate ?? DateOnly.MinValue,
-                                PeriodToDate           = row.ToDate ?? DateOnly.MinValue,
-                                DueDate                = row.ToDate ?? DateOnly.MinValue,
-                                ActualDayCount         = row.DayCount,
-                                OpeningPrincipalAmount = row.OpeningPrincipal,
-                                InstallmentAmount      = row.Installment,
-                                DuePrincipalAmount     = row.DuePrincipal,
-                                DueInterestAmount      = row.DueInterest,
-                                DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee,
-                                DueQltsAmount          = row.DueQlts,
-                                DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee,
-                                ClosingPrincipalAmount = row.ClosingPrincipal,
-                                StatusCode             = ScheduleStatus.Pending,
-                                CreatedAt              = now,
-                                UpdatedAt              = now,
-                            });
+                                // Cập nhật row hiện có
+                                existing.PeriodFromDate         = row.FromDate ?? DateOnly.MinValue;
+                                existing.PeriodToDate           = row.ToDate ?? DateOnly.MinValue;
+                                existing.DueDate                = row.ToDate ?? DateOnly.MinValue;
+                                existing.ActualDayCount         = row.DayCount;
+                                existing.OpeningPrincipalAmount = row.OpeningPrincipal;
+                                existing.InstallmentAmount      = row.Installment;
+                                existing.DuePrincipalAmount     = row.DuePrincipal;
+                                existing.DueInterestAmount      = row.DueInterest;
+                                existing.DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee;
+                                existing.DueQltsAmount          = row.DueQlts;
+                                existing.DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee;
+                                existing.ClosingPrincipalAmount = row.ClosingPrincipal;
+                                existing.StatusCode             = ScheduleStatus.Pending;
+                                existing.UpdatedAt              = now;
+                            }
+                            else
+                            {
+                                // Thêm kỳ mới (trường hợp số kỳ tăng)
+                                DbContext.LoanRepaymentSchedules.Add(new LoanRepaymentSchedule
+                                {
+                                    ScheduleId             = Guid.CreateVersion7(),
+                                    LoanContractId         = contract.LoanContractId,
+                                    PeriodNo               = row.PeriodNo,
+                                    PeriodFromDate         = row.FromDate ?? DateOnly.MinValue,
+                                    PeriodToDate           = row.ToDate ?? DateOnly.MinValue,
+                                    DueDate                = row.ToDate ?? DateOnly.MinValue,
+                                    ActualDayCount         = row.DayCount,
+                                    OpeningPrincipalAmount = row.OpeningPrincipal,
+                                    InstallmentAmount      = row.Installment,
+                                    DuePrincipalAmount     = row.DuePrincipal,
+                                    DueInterestAmount      = row.DueInterest,
+                                    DueQlkvAmount          = row.DueQlkv + row.DueFixedMonthlyFee,
+                                    DueQltsAmount          = row.DueQlts,
+                                    DuePeriodicFeeAmount   = row.DueQlkv + row.DueQlts + row.DueFixedMonthlyFee,
+                                    ClosingPrincipalAmount = row.ClosingPrincipal,
+                                    StatusCode             = ScheduleStatus.Pending,
+                                    CreatedAt              = now,
+                                    UpdatedAt              = now,
+                                });
+                            }
+                        }
+
+                        // Đánh dấu các kỳ dư thừa (nếu cũ có nhiều kỳ hơn mới) → zero-out + CANCELLED
+                        var newPeriodNos = calc.Schedule.Select(r => r.PeriodNo).ToHashSet();
+                        foreach (var surplus in existingSchedules.Where(s => !newPeriodNos.Contains(s.PeriodNo)))
+                        {
+                            surplus.OpeningPrincipalAmount = 0;
+                            surplus.InstallmentAmount      = 0;
+                            surplus.DuePrincipalAmount     = 0;
+                            surplus.DueInterestAmount      = 0;
+                            surplus.DueQlkvAmount          = 0;
+                            surplus.DueQltsAmount          = 0;
+                            surplus.DuePeriodicFeeAmount   = 0;
+                            surplus.ClosingPrincipalAmount = 0;
+                            surplus.StatusCode             = "CANCELLED";
+                            surplus.UpdatedAt              = now;
+                        }
+
+                        // Lưu từng hợp đồng riêng để cách ly lỗi — nếu 1 HĐ lỗi thì không ảnh hưởng HĐ khác
+                        await DbContext.SaveChangesAsync();
+                        updatedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Lấy inner exception để debug — EF thường wrap lỗi DB thật bên trong
+                        var innerMsg = ex.InnerException?.Message ?? ex.Message;
+                        errors.Add($"{contract.ContractNo}: {innerMsg}");
+
+                        // Detach các entity bị lỗi để không ảnh hưởng các lần SaveChanges tiếp theo
+                        foreach (var entry in DbContext.ChangeTracker.Entries()
+                            .Where(e => e.State == EntityState.Added || e.State == EntityState.Deleted || e.State == EntityState.Modified))
+                        {
+                            entry.State = EntityState.Detached;
                         }
                     }
-
-                    // Đánh dấu các kỳ dư thừa (nếu cũ có nhiều kỳ hơn mới) → zero-out + CANCELLED
-                    var newPeriodNos = calc.Schedule.Select(r => r.PeriodNo).ToHashSet();
-                    foreach (var surplus in existingSchedules.Where(s => !newPeriodNos.Contains(s.PeriodNo)))
-                    {
-                        surplus.OpeningPrincipalAmount = 0;
-                        surplus.InstallmentAmount      = 0;
-                        surplus.DuePrincipalAmount     = 0;
-                        surplus.DueInterestAmount      = 0;
-                        surplus.DueQlkvAmount          = 0;
-                        surplus.DueQltsAmount          = 0;
-                        surplus.DuePeriodicFeeAmount   = 0;
-                        surplus.ClosingPrincipalAmount  = 0;
-                        surplus.StatusCode             = "CANCELLED";
-                        surplus.UpdatedAt              = now;
-                    }
-
-                    // Lưu từng hợp đồng riêng để cách ly lỗi — nếu 1 HĐ lỗi thì không ảnh hưởng HĐ khác
-                    await DbContext.SaveChangesAsync();
-                    updatedCount++;
                 }
-                catch (Exception ex)
-                {
-                    // Lấy inner exception để debug — EF thường wrap lỗi DB thật bên trong
-                    var innerMsg = ex.InnerException?.Message ?? ex.Message;
-                    errors.Add($"{contract.ContractNo}: {innerMsg}");
 
-                    // Detach các entity bị lỗi để không ảnh hưởng các lần SaveChanges tiếp theo
-                    foreach (var entry in DbContext.ChangeTracker.Entries()
-                        .Where(e => e.State == EntityState.Added || e.State == EntityState.Deleted || e.State == EntityState.Modified))
-                    {
-                        entry.State = EntityState.Detached;
-                    }
-                }
+                // Giải phóng tracking sau mỗi batch để giảm memory và tốc độ detect changes.
+                DbContext.ChangeTracker.Clear();
+                pageIndex++;
             }
 
             if (errors.Count > 0)
@@ -1704,6 +1789,20 @@ namespace CrediFlow.API.Services
             });
 
             await DbContext.SaveChangesAsync();
+
+            await _activityLogService.LogAsync(new ActivityLogWriteModel
+            {
+                ModuleCode = "LOAN_CONTRACT",
+                ActionCode = "ASSIGN",
+                EntityType = "LOAN_CONTRACT",
+                EntityId = obj.LoanContractId,
+                LoanContractId = obj.LoanContractId,
+                CustomerId = obj.CustomerId,
+                StoreId = obj.StoreId,
+                Summary = $"Chuyen giao hop dong {obj.ContractNo} cho {targetUser.FullName ?? targetUser.Username}",
+                OldData = JsonSerializer.Serialize(new { AssignedToUserId = oldAssignedUserId, StoreId = oldStoreId }),
+                NewData = JsonSerializer.Serialize(new { AssignedToUserId = targetUserId, StoreId = obj.StoreId }),
+            });
             return obj;
         }
     }

@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="CrediFlow.API/CrediFlow.API.csproj" />
+  <Project Path="CrediFlow.HangfireWorker/CrediFlow.HangfireWorker.csproj" />
   <Project Path="CrediFlow.Common/CrediFlow.Common.csproj" Id="89a87d6b-ff92-4e5c-9daa-6dc2eef01324" />
   <Project Path="CrediFlow.DataContext/CrediFlow.DataContext.csproj" />
 </Solution>

@@ -81,7 +81,7 @@ namespace CrediFlow.API.Services
             }
             else
             {
-                obj = await DbContext.CashVouchers.FindAsync(model.VoucherId)
+                obj = await DbContext.CashVouchers.FirstOrDefaultAsync(v => v.VoucherId == model.VoucherId)
                       ?? throw new KeyNotFoundException($"Không tìm thấy phiếu với Id = {model.VoucherId}");
             }
 

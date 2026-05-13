@@ -41,6 +41,8 @@ public partial class CrediflowContext : DbContext
 
     public virtual DbSet<DataAccessLog> DataAccessLogs { get; set; }
 
+    public virtual DbSet<ActivityLog> ActivityLogs { get; set; }
+
     public virtual DbSet<InsuranceContract> InsuranceContracts { get; set; }
 
     public virtual DbSet<LoanCharge> LoanCharges { get; set; }
@@ -380,6 +382,11 @@ public partial class CrediflowContext : DbContext
                 .HasColumnName("payment_method");
             entity.Property(e => e.BankName).HasColumnName("bank_name");
             entity.Property(e => e.BankAccountNumber).HasColumnName("bank_account_number");
+            entity.Property(e => e.IsDeleted)
+                .HasDefaultValue(false)
+                .HasColumnName("is_deleted");
+
+            entity.HasQueryFilter(e => !e.IsDeleted);
 
             entity.HasOne(d => d.ApprovedByNavigation).WithMany(p => p.CashVoucherApprovedByNavigations)
                 .HasForeignKey(d => d.ApprovedBy)
@@ -829,6 +836,78 @@ public partial class CrediflowContext : DbContext
             entity.HasOne(d => d.User).WithMany(p => p.DataAccessLogs)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("data_access_logs_user_id_fkey");
+        });
+
+        modelBuilder.Entity<ActivityLog>(entity =>
+        {
+            entity.HasKey(e => e.ActivityLogId).HasName("activity_logs_pkey");
+
+            entity.ToTable("activity_logs");
+
+            entity.HasIndex(e => e.ChangedAtUtc, "ix_activity_logs_changed_at_utc").IsDescending();
+
+            entity.HasIndex(e => new { e.ModuleCode, e.ChangedAtUtc }, "ix_activity_logs_module_changed_at_utc").IsDescending(false, true);
+
+            entity.HasIndex(e => new { e.ActionCode, e.ChangedAtUtc }, "ix_activity_logs_action_changed_at_utc").IsDescending(false, true);
+
+            entity.HasIndex(e => new { e.ChangedBy, e.ChangedAtUtc }, "ix_activity_logs_changed_by_changed_at_utc").IsDescending(false, true);
+
+            entity.HasIndex(e => e.CustomerId, "ix_activity_logs_customer_id");
+
+            entity.HasIndex(e => e.LoanContractId, "ix_activity_logs_loan_contract_id");
+
+            entity.HasIndex(e => e.StoreId, "ix_activity_logs_store_id");
+
+            entity.Property(e => e.ActivityLogId)
+                .HasDefaultValueSql("gen_random_uuid()")
+                .HasColumnName("activity_log_id");
+            entity.Property(e => e.ActionCode).HasColumnName("action_code");
+            entity.Property(e => e.ChangedAtUtc)
+                .HasColumnType("timestamp without time zone")
+                .HasColumnName("changed_at_utc");
+            entity.Property(e => e.ChangedBy).HasColumnName("changed_by");
+            entity.Property(e => e.CustomerId).HasColumnName("customer_id");
+            entity.Property(e => e.EntityId).HasColumnName("entity_id");
+            entity.Property(e => e.EntityType).HasColumnName("entity_type");
+            entity.Property(e => e.IpAddress).HasColumnName("ip_address");
+            entity.Property(e => e.LoanContractId).HasColumnName("loan_contract_id");
+            entity.Property(e => e.Metadata)
+                .HasColumnType("jsonb")
+                .HasColumnName("metadata");
+            entity.Property(e => e.ModuleCode).HasColumnName("module_code");
+            entity.Property(e => e.NewData)
+                .HasColumnType("jsonb")
+                .HasColumnName("new_data");
+            entity.Property(e => e.OldData)
+                .HasColumnType("jsonb")
+                .HasColumnName("old_data");
+            entity.Property(e => e.RequestPath).HasColumnName("request_path");
+            entity.Property(e => e.StoreId).HasColumnName("store_id");
+            entity.Property(e => e.Summary).HasColumnName("summary");
+
+            entity.HasOne<AppUser>()
+                .WithMany()
+                .HasForeignKey(d => d.ChangedBy)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("activity_logs_changed_by_fkey");
+
+            entity.HasOne<Customer>()
+                .WithMany()
+                .HasForeignKey(d => d.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("activity_logs_customer_id_fkey");
+
+            entity.HasOne<LoanContract>()
+                .WithMany()
+                .HasForeignKey(d => d.LoanContractId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("activity_logs_loan_contract_id_fkey");
+
+            entity.HasOne<Store>()
+                .WithMany()
+                .HasForeignKey(d => d.StoreId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("activity_logs_store_id_fkey");
         });
 
         modelBuilder.Entity<InsuranceContract>(entity =>

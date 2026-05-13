@@ -1,7 +1,9 @@
 using CrediFlow.API.Models;
 using CrediFlow.API.Services;
+using CrediFlow.API.Interceptors;
 using CrediFlow.Common.Models;
 using CrediFlow.Common.Services;
+using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,15 +16,24 @@ namespace CrediFlow.API.Controllers
     {
         private readonly ILoanContractService _loanContractService;
         private readonly IUserInfoService _userInfoService;
+        private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly JobStorage _jobStorage;
 
-        public LoanContractController(ILoanContractService loanContractService, IUserInfoService userInfoService)
+        public LoanContractController(
+            ILoanContractService loanContractService,
+            IUserInfoService userInfoService,
+            IBackgroundJobClient backgroundJobClient,
+            JobStorage jobStorage)
         {
             _loanContractService = loanContractService;
             _userInfoService = userInfoService;
+            _backgroundJobClient = backgroundJobClient;
+            _jobStorage = jobStorage;
         }
 
         // GET api/LoanContract/GetAll
         [HttpGet]
+        [ActivityLogRead("LOAN_CONTRACT", "LOAN_CONTRACT")]
         public async Task<ActionResult<ResultAPI>> GetAll()
         {
             var rs = await _loanContractService.GetAlls();
@@ -31,6 +42,7 @@ namespace CrediFlow.API.Controllers
 
         // POST api/LoanContract/GetById
         [HttpPost]
+        [ActivityLogRead("LOAN_CONTRACT", "LOAN_CONTRACT")]
         public async Task<ActionResult<ResultAPI>> GetById([FromBody] Guid id)
         {
             var rs = await _loanContractService.GetAsync(id);
@@ -42,6 +54,7 @@ namespace CrediFlow.API.Controllers
 
         // POST api/LoanContract/Search
         [HttpPost]
+        [ActivityLogRead("LOAN_CONTRACT", "LOAN_CONTRACT")]
         public async Task<ActionResult<ResultAPI>> Search([FromBody] SearchLoanContractRequest request)
         {
             // FilterStoreIds dùng cho UI lọc thêm trong phạm vi được phân quyền.
@@ -234,25 +247,62 @@ namespace CrediFlow.API.Controllers
         // POST api/LoanContract/RecalculateAllSchedules
         /// <summary>Tính toán lại lịch trả nợ cho tất cả HĐ trả góp chưa có thanh toán (Admin only).</summary>
         [HttpPost]
-        public async Task<ActionResult<ResultAPI>> RecalculateAllSchedules()
+        public ActionResult<ResultAPI> RecalculateAllSchedules()
         {
             if (!_userInfoService.IsAdmin)
                 return Ok(ResultAPI.ResultWithAccessDenined());
 
             try
             {
-                var count = await _loanContractService.RecalculateAllPendingSchedulesAsync();
-                return Ok(ResultAPI.Success(new { UpdatedCount = count }, $"Đã tính toán lại lịch trả nợ cho {count} hợp đồng."));
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Ok(ResultAPI.Error(new { Message = ex.Message }, ex.Message, 400));
+                var jobId = _backgroundJobClient.Enqueue<ILoanScheduleRecalculationJob>(
+                    x => x.ExecuteAsync());
+
+                return Ok(ResultAPI.Success(
+                    new
+                    {
+                        JobId = jobId,
+                        Status = "ENQUEUED",
+                        StatusApi = $"/api/LoanContract/GetRecalculateAllSchedulesJobStatus/{jobId}"
+                    },
+                    "Đã đưa yêu cầu tính toán lại lịch trả nợ vào hàng đợi nền."));
             }
             catch (Exception ex)
             {
                 var msg = ex.InnerException?.Message ?? ex.Message;
                 return Ok(ResultAPI.Error(null, $"Lỗi: {msg}", 500));
             }
+        }
+
+        // GET api/LoanContract/GetRecalculateAllSchedulesJobStatus/{jobId}
+        /// <summary>Kiểm tra trạng thái job recalculation đang chạy nền.</summary>
+        [HttpGet("{jobId}")]
+        public ActionResult<ResultAPI> GetRecalculateAllSchedulesJobStatus(string jobId)
+        {
+            if (!_userInfoService.IsAdmin)
+                return Ok(ResultAPI.ResultWithAccessDenined());
+
+            using var connection = _jobStorage.GetConnection();
+            var jobData = connection.GetJobData(jobId);
+            if (jobData == null)
+                return Ok(ResultAPI.Error(null, "Không tìm thấy jobId.", 404));
+
+            var stateData = connection.GetStateData(jobId);
+            var state = stateData?.Name ?? jobData.State;
+            string? exceptionMessage = null;
+            if (stateData?.Data != null)
+                stateData.Data.TryGetValue("ExceptionMessage", out exceptionMessage);
+
+            var isFinished = state is "Succeeded" or "Deleted" or "Failed";
+
+            return Ok(ResultAPI.Success(new
+            {
+                JobId = jobId,
+                State = state,
+                Reason = stateData?.Reason,
+                Error = exceptionMessage,
+                CreatedAt = jobData.CreatedAt,
+                IsFinished = isFinished,
+            }));
         }
     }
 

@@ -7,6 +7,7 @@ using CrediFlow.DataContext.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 
 namespace CrediFlow.API.Services
 {
@@ -31,9 +32,12 @@ namespace CrediFlow.API.Services
 
     public class CustomerService : BaseService<Customer, CrediflowContext>, ICustomerService
     {
-        public CustomerService(CrediflowContext dbContext, ICachingHelper cachingHelper, IUserInfoService user)
+        private readonly IActivityLogService _activityLogService;
+
+        public CustomerService(CrediflowContext dbContext, ICachingHelper cachingHelper, IUserInfoService user, IActivityLogService activityLogService)
             : base(dbContext, cachingHelper, user)
         {
+            _activityLogService = activityLogService;
         }
 
         private IReadOnlyList<Guid>? GetStoreScopeIds(Guid? storeId = null) => User.GetStoreScopeIds(storeId);
@@ -80,6 +84,7 @@ namespace CrediFlow.API.Services
 
             bool isCreate = model.CustomerId == null || model.CustomerId == Guid.Empty;
             Customer obj;
+            object? oldSnapshot = null;
 
             if (isCreate)
             {
@@ -109,6 +114,17 @@ namespace CrediFlow.API.Services
                         throw new UnauthorizedAccessException(
                             "Bạn chỉ có thể chỉnh sửa khách hàng mà bạn đang phụ trách.");
                 }
+
+                oldSnapshot = new
+                {
+                    obj.FullName,
+                    obj.Phone,
+                    obj.Address,
+                    obj.FirstStoreId,
+                    obj.AssignedToUserId,
+                    obj.HasBadHistory,
+                    obj.BadHistoryNote,
+                };
             }
 
             // Ánh xạ các trường từ model → entity
@@ -141,6 +157,33 @@ namespace CrediFlow.API.Services
             obj.BadHistoryNote = model.BadHistoryNote ?? obj.BadHistoryNote;
 
             await DbContext.SaveChangesAsync();
+
+            var newSnapshot = new
+            {
+                obj.CustomerId,
+                obj.FullName,
+                obj.Phone,
+                obj.Address,
+                obj.FirstStoreId,
+                obj.AssignedToUserId,
+                obj.HasBadHistory,
+                obj.BadHistoryNote,
+            };
+
+            await _activityLogService.LogAsync(new ActivityLogWriteModel
+            {
+                ModuleCode = "CUSTOMER",
+                ActionCode = isCreate ? "CREATE" : "UPDATE",
+                EntityType = "CUSTOMER",
+                EntityId = obj.CustomerId,
+                CustomerId = obj.CustomerId,
+                StoreId = obj.FirstStoreId,
+                Summary = isCreate
+                    ? $"Tao moi khach hang {obj.FullName}"
+                    : $"Cap nhat khach hang {obj.FullName}",
+                OldData = oldSnapshot != null ? JsonSerializer.Serialize(oldSnapshot) : null,
+                NewData = JsonSerializer.Serialize(newSnapshot),
+            });
 
             return obj;
         }
@@ -366,13 +409,13 @@ namespace CrediFlow.API.Services
                 TableName = "customers",
                 RecordId = customerId,
                 ActionCode = "ASSIGN",
-                OldData = System.Text.Json.JsonSerializer.Serialize(new
+                OldData = JsonSerializer.Serialize(new
                 {
                     AssignedToUserId = oldAssignedUserId,
                     FirstStoreId = oldStoreId,
                     StoreName = oldStoreName,
                 }),
-                NewData = System.Text.Json.JsonSerializer.Serialize(new
+                NewData = JsonSerializer.Serialize(new
                 {
                     AssignedToUserId = targetUserId,
                     FirstStoreId = targetUser.StoreId,
@@ -389,6 +432,19 @@ namespace CrediFlow.API.Services
             });
 
             await DbContext.SaveChangesAsync();
+
+            await _activityLogService.LogAsync(new ActivityLogWriteModel
+            {
+                ModuleCode = "CUSTOMER",
+                ActionCode = "ASSIGN",
+                EntityType = "CUSTOMER",
+                EntityId = customerId,
+                CustomerId = customerId,
+                StoreId = targetUser.StoreId,
+                Summary = $"Chuyen giao khach hang {obj.FullName} cho {targetUser.FullName ?? targetUser.Username}",
+                OldData = JsonSerializer.Serialize(new { AssignedToUserId = oldAssignedUserId, FirstStoreId = oldStoreId }),
+                NewData = JsonSerializer.Serialize(new { AssignedToUserId = targetUserId, FirstStoreId = targetUser.StoreId, ContractsTransferred = contracts.Count }),
+            });
         }
 
         private async Task<string> GenerateCustomerCodeAsync(Guid storeId)

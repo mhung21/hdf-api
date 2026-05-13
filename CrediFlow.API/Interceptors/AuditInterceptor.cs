@@ -23,6 +23,7 @@ public class AuditInterceptor : SaveChangesInterceptor
     private static readonly HashSet<string> SkipTables = new(StringComparer.OrdinalIgnoreCase)
     {
         "audit_logs",
+        "activity_logs",
         "contract_audit_logs",
         "data_access_logs",
         "user_login_histories",
